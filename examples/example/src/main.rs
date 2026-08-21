@@ -16,7 +16,7 @@
 //	cargo run --example example -- time now                 # 时间值（RFC3339）
 //	cargo run --example example -- sys sleep --d 300ms      # std Duration；>5s 报错
 //	cargo run --example example -- sys port -p 9090         # 命名标量 #[derive(XyzField)]
-//	cargo run --example example -- file hash --data hello   # Vec<u8>
+//	cargo run --example example -- file hash --data hello   # Vec<u8>（SHA-256）
 //	NEXT_KEY=k cargo run --example example -- net head      # header/http_name + env
 //	cargo run --example example -- mcp stdio                # MCP：命令即工具
 //	cargo run --example example -- serve --addr :8080       # HTTP：REST + /openapi.json + /mcp
@@ -229,13 +229,10 @@ struct HashArgs {
 }
 
 fn hash_data(_ctx: &xyz_rust::Ctx, in_: &HashArgs) -> errs::Result<String> {
-    // 零第三方示例位阶：FNV-1a 64
-    let mut h: u64 = 0xcbf29ce484222325;
-    for b in &in_.data {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    Ok(format!("{h:016x}"))
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(&in_.data);
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 // ---- net.head：HTTP header 绑定 + http_name + secret + env ----
@@ -339,7 +336,7 @@ fn main() {
                 }),
 
             &xyz_rust::define("file.hash", hash_data)
-                .summary("计算哈希")
+                .summary("计算 SHA-256")
                 .cli(CliHints {
                     fields: cli_fields(&[("data", CliFieldHint { shorthand: Some("d".into()), ..Default::default() })]),
                     ..Default::default()

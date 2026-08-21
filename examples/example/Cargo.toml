@@ -8,6 +8,7 @@ publish = false
 xyz-rust = { path = "../..", default-features = false }
 serde = { version = "1", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
+sha2 = "0.10"
 
 [features]
 default = ["cli", "http", "mcp"]
