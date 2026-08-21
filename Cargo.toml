@@ -1,0 +1,64 @@
+[package]
+name = "xyz-rust"
+version = "0.1.0"
+edition = "2024"
+description = "One definition, three interfaces（CLI / HTTP / MCP）— a command toolkit for Rust"
+license = "MIT"
+repository = "https://github.com/ejfkdev/xyz-rust"
+keywords = ["cli", "http", "mcp", "command", "toolkit"]
+categories = ["command-line-interface", "web-programming", "api-bindings"]
+readme = "README.md"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", features = ["serde"] }
+xyz-rust-macros = { path = "xyz-rust-macros", version = "0.1.0" }
+
+# Channel-trimming features（对齐 Go 的 nocli/nomcp/nohttp build tags）：
+#   feature cli  -> CLI 前端（自带最小信号依赖；核心仍零三方）
+#   feature http -> HTTP 前端（tokio + axum + tower-http + axum-server/rustls）
+#   feature mcp  -> MCP 前端（官方 Rust SDK rmcp；ppt 依赖栈与 http 共享）
+# 全部关闭 = 仅嵌入（embedding only）。
+ctrlc = { version = "3.4", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"], optional = true }
+axum = { version = "0.8", optional = true }
+axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
+tower-http = { version = "0.6", features = ["compression-gzip", "timeout"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
+rustls-pemfile = { version = "2", optional = true }
+futures-util = { version = "0.3", optional = true }
+tokio-util = { version = "0.7", optional = true }
+rmcp = { version = "=3.1.4", default-features = false, features = [
+    "server",
+    "transport-io",
+    "transport-worker",
+    "server-side-http",
+    "transport-streamable-http-server",
+], optional = true }
+
+[features]
+default = ["cli", "http", "mcp"]
+cli = ["dep:ctrlc"]
+# http-stack 是 http / mcp 特征共用的 tokio+axum 依赖簇（不是公开通道开关）。
+http-stack = [
+    "dep:tokio",
+    "dep:axum",
+    "dep:axum-server",
+    "dep:tower-http",
+    "dep:rustls",
+    "dep:rustls-pemfile",
+    "dep:futures-util",
+    "dep:tokio-util",
+]
+http = ["http-stack"]
+mcp = ["dep:rmcp", "http-stack"]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+bytes = "1"
+
+[workspace]
+members = [".", "xyz-rust-macros", "examples/example", "examples/tour", "examples/clap"]

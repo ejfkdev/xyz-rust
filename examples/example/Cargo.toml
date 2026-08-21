@@ -1,0 +1,16 @@
+[package]
+name = "xyz-example"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+xyz-rust = { path = "../..", default-features = false }
+serde = { version = "1", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+
+[features]
+default = ["cli", "http", "mcp"]
+cli = ["xyz-rust/cli"]
+http = ["xyz-rust/http"]
+mcp = ["xyz-rust/mcp"]
