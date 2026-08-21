@@ -147,6 +147,18 @@ xyz-example serve --addr :8080    HTTP：REST 路由 + /openapi.json + 同端口
 xyz-example mcp stdio|http        MCP：官方 Rust SDK，两种传输（--versions 限定协议版本）
 xyz-example completion bash|zsh|fish   内置 shell 补全脚本
 ```
+**默认子命令**（仅 CLI）：在 `CliHints` 中标记 `default: true` 的命令成为
+其父节点的默认子命令——首段参数匹配不到任何已注册命令段（且不是 flag）时，
+整串参数原样转发给它：
+
+```rust
+define("extract", extract)
+    .cli(CliHints { usage: "extract <image.tar>", default: true, ..Default::default() })
+    .run();
+// udf ./image.tar  ⟺  udf extract ./image.tar
+// 每个父节点最多一个默认；flag / 显式路径 / -h / -v 均不受影响
+```
+
 
 **CLI**（std + serde；自带前端不引 clap——`examples/clap` 演示如何换用 clap）：注册名 `user.add` 生成两级子命令 `user add`；`-h/--help` 逐命令帮助（内联 `(default …)`/`(env …)`/`(oneof …)` 提示），`-v/--version` 输出版本（默认 `CARGO_PKG_VERSION`，可用 `set_version("v1.2.3")` 覆盖——Rust 没有 Go 的 `-ldflags -X` 等价机制）。
 

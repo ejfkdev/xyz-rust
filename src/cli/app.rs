@@ -205,6 +205,16 @@ impl App {
                 None => break,
             }
         }
+        // 默认子命令：首段不是已注册命令段、也不是 flag（-h/-v 等）时，
+        // 整串参数不消费地转发给默认子命令（udf img ⇔ udf extract img）。
+        if !node.leaf
+            && !rest.is_empty()
+            && !rest[0].starts_with('-')
+            && let Some(seg) = node.default_segment.clone()
+            && let Some(child) = node.children.iter().find(|c| c.segment == seg)
+        {
+            node = child.clone();
+        }
         for t in rest {
             if t == "-h" || t == "--help" {
                 return self.print_help(&node, bin);

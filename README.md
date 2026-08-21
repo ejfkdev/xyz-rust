@@ -147,6 +147,19 @@ xyz-example mcp stdio|http      MCP: official Rust SDK, two transports (--versio
 xyz-example completion bash|zsh|fish   Built-in shell completion scripts
 ```
 
+**Default subcommand** (CLI only): a command marked `default: true` in its
+`CliHints` becomes the default child of its parent node — when the first
+argument matches no registered segment (and is not a flag), the whole
+argument list is forwarded to it unchanged:
+
+```rust
+define("extract", extract)
+    .cli(CliHints { usage: "extract <image.tar>", default: true, ..Default::default() })
+    .run();
+// udf ./image.tar  ⟺  udf extract ./image.tar
+// one default per parent node; flags/explicit paths/-h/-v are unaffected
+```
+
 **CLI** (std + serde; no clap in the shipped frontend — `examples/clap` shows how to bring your own): registry name `user.add` becomes the two-level subcommand `user add`; `-h/--help` prints per-command help (with inline `(default …)`/`(env …)`/`(oneof …)` hints), `-v/--version` prints the version (default `CARGO_PKG_VERSION`, overridable with `set_version("v1.2.3")` — Rust has no `-ldflags -X` equivalent).
 
 **HTTP** (axum): routes come straight from `HTTPHints { method, path }` (`{name}` is a path parameter bound to a field with `http = "path"`); fields without an `http:` attribute bind from the query string by default, a JSON body merges as the argument base; supported methods are GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS (others are a registration error); the error taxonomy maps to status codes (400/401/403/404/409/499/500/503) with `{"error":"..."}` bodies; `GET /openapi.json` serves an OpenAPI 3 document from the same `InputSchema` (response schemas included); `GET /healthz` probes liveness and gzip is answered transparently. Commands without HTTP hints are not routed.

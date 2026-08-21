@@ -30,6 +30,10 @@ pub struct CliHints {
     pub aliases: Vec<String>,
     /// 从帮助列表里隐藏。
     pub hidden: bool,
+    /// 使该命令成为其父节点的默认子命令：首段不是已注册命令段（且不是
+    /// flag）时，整串参数不消费地转发给它（udf image.tar ⇔
+    /// udf extract image.tar，当 extract 标记了 default）。
+    pub default: bool,
     pub fields: HashMap<String, CliFieldHint>,
 }
 

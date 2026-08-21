@@ -31,6 +31,9 @@ pub struct CmdNode {
     pub max_pos: usize,
     /// 有序子节点（按段名排序；别名不占列表位）。
     pub children: Vec<CmdNode>,
+    /// 默认子命令的末段名（CliHints.default）；执行期未匹配命令段时整串
+    /// 参数转发给它。
+    pub default_segment: Option<String>,
 }
 
 impl CmdNode {
@@ -51,6 +54,7 @@ impl CmdNode {
             min_pos: 0,
             max_pos: 0,
             children: Vec::new(),
+            default_segment: None,
         }
     }
 }
@@ -125,7 +129,9 @@ fn add_parts(node: &mut CmdNode, parts: &[&str], idx: usize, e: &Arc<Entry>) -> 
                     ));
                 }
             }
-            fill_leaf(&mut node.children[i], e)
+            fill_leaf(&mut node.children[i], e)?;
+            set_default(node, part, e)?;
+            Ok(())
         }
         None => {
             for alias in &e.cli.aliases {
@@ -142,9 +148,31 @@ fn add_parts(node: &mut CmdNode, parts: &[&str], idx: usize, e: &Arc<Entry>) -> 
             let mut leaf = CmdNode::new(part);
             fill_leaf(&mut leaf, e)?;
             node.children.push(leaf);
+            set_default(node, part, e)?;
             Ok(())
         }
     }
+}
+
+/// Default：登记为父节点的默认子命令，一个父节点最多一个（注册期报错）。
+fn set_default(node: &mut CmdNode, part: &str, e: &Arc<Entry>) -> errors::Result<()> {
+    if !e.cli.default {
+        return Ok(());
+    }
+    if let Some(prev) = &node.default_segment {
+        if prev != part {
+            return Err(errors::Error::new(
+                errors::Kind::Internal,
+                format!(
+                    "cli: command {:?}: default conflicts with existing default {:?}",
+                    e.name, prev
+                ),
+            ));
+        }
+        return Ok(());
+    }
+    node.default_segment = Some(part.to_string());
+    Ok(())
 }
 
 fn fill_leaf(node: &mut CmdNode, e: &Arc<Entry>) -> errors::Result<()> {

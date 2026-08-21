@@ -1766,7 +1766,7 @@ dependencies = [
 
 [[package]]
 name = "xyz-rust"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "axum",
  "axum-server",
@@ -1789,7 +1789,7 @@ dependencies = [
 
 [[package]]
 name = "xyz-rust-macros"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "proc-macro2",
  "quote",

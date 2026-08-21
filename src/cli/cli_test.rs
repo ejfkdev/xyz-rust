@@ -311,6 +311,77 @@ fn middleware_chain_sees_args_and_can_short_circuit() {
 }
 
 #[test]
+fn default_subcommand_forwards_all_args() {
+    let reg = Registry::new();
+
+    #[derive(XyzArgs)]
+    struct ExtractArgs {
+        #[xyz(desc = "归档", required, cli = "positional")]
+        name: String,
+        #[xyz(desc = "级别", default = "0")]
+        level: i32,
+    }
+    fn extract(_: &Ctx, in_: &ExtractArgs) -> errors::Result<String> {
+        Ok(format!("{}:{}", in_.name, in_.level))
+    }
+    Command::new("extract", extract)
+        .cli(crate::CliHints {
+            usage: "extract <name>".into(),
+            default: true,
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    // 老用法：udf ./image.tar —— 全部参数转发给默认的 extract
+    let (code, out, _) = run_app(&reg, &["./image.tar", "--level", "9"]);
+    assert_eq!(code, 0);
+    assert_eq!(out, "./image.tar:9\n");
+    // 显式子命令路径不受影响
+    let (code, out, _) = run_app(&reg, &["extract", "tarball.tar"]);
+    assert_eq!(code, 0);
+    assert_eq!(out, "tarball.tar:0\n");
+    // -h/-v 不触发默认下沉（根帮助仍在）
+    let (code, out, _) = run_app(&reg, &["-h"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("Usage:"), "{out}");
+    assert!(out.contains("extract"), "{out}");
+    // 位置参数之后的 -h 归默认命令自己的帮助
+    let (code, out, _) = run_app(&reg, &["img.tar", "-h"]);
+    assert_eq!(code, 0);
+    assert!(out.contains("extract <name> [flags]"), "{out}");
+}
+
+#[test]
+fn duplicate_default_rejected_at_build() {
+    let reg = Registry::new();
+
+    #[derive(XyzArgs)]
+    struct X {
+        #[xyz(desc = "x")]
+        x: String,
+    }
+    fn xh(_: &Ctx, _: &X) -> errors::Result<String> {
+        Ok(String::new())
+    }
+    Command::new("a.one", xh)
+        .cli(crate::CliHints {
+            default: true,
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    Command::new("a.two", xh)
+        .cli(crate::CliHints {
+            default: true,
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let err = app_build_error(&reg);
+    assert!(err.to_string().contains("default conflicts"), "{err}");
+}
+
+#[test]
 fn double_dash_terminator_guards_v_and_json() {
     let reg = Registry::new();
 
