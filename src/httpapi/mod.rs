@@ -137,6 +137,11 @@ async fn handle_request(entry: Arc<Entry>, ctx: Arc<Ctx>, req: Request) -> Respo
         Vec::new()
     };
     if !body_bytes.is_empty() {
+        let json_declared = headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.contains("application/json"))
+            .unwrap_or(false);
         match serde_json::from_slice::<serde_json::Value>(&body_bytes) {
             Ok(Value::Object(parsed)) => {
                 for (k, v) in parsed {
@@ -146,8 +151,12 @@ async fn handle_request(entry: Arc<Entry>, ctx: Arc<Ctx>, req: Request) -> Respo
             Ok(_) => {
                 return write_error(StatusCode::BAD_REQUEST, "invalid JSON body");
             }
-            Err(_) => {
+            Err(_) if json_declared => {
+                // 显式声明 application/json 却解析失败：严格 400。
                 return write_error(StatusCode::BAD_REQUEST, "invalid JSON body");
+            }
+            Err(_) => {
+                // 非 JSON 声明（如表单体）解析失败：交给 form 绑定，不提前判死。
             }
         }
     }
@@ -192,11 +201,10 @@ async fn handle_request(entry: Arc<Entry>, ctx: Arc<Ctx>, req: Request) -> Respo
             }
             "form" => {
                 if form_parsed.is_none() {
-                    let mut pairs = crate::httpapi::parse_form_query(&query);
-                    pairs.extend(crate::httpapi::parse_form_query(&String::from_utf8_lossy(
+                    // 与上游一致：form 值仅来自请求体（已读字节，避免二读 body）。
+                    form_parsed = Some(crate::httpapi::parse_form_query(&String::from_utf8_lossy(
                         &body_bytes,
                     )));
-                    form_parsed = Some(pairs);
                 }
                 if let Some((_, v)) = form_parsed
                     .as_ref()

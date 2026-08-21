@@ -77,8 +77,12 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
     if reg.names().is_empty() {
         return 0;
     }
-    // 壳能力：-v/--version 由根派发器管，任何能力组合下都可用。
+    // 壳能力：-v/--version 由根派发器管，任何能力组合下都可用
+    // （"--" 之后的 token 一律是位置参数，不再识别 -v）。
     for a in &args {
+        if a == "--" {
+            break;
+        }
         if a == "-v" || a == "--version" {
             let bin = crate::cli::app::bin_name();
             println!("{bin} version {}", crate::version::version());

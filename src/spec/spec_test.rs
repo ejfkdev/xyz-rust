@@ -278,6 +278,31 @@ fn validation_rules() {
 }
 
 #[derive(XyzArgs)]
+struct FracArgs {
+    #[xyz(desc = "小数阈值", validate = "gt=1.5")]
+    f: f64,
+    #[xyz(desc = "整数阈值不变", validate = "min=2")]
+    n: i64,
+}
+
+fn frac_h(_: &Ctx, in_: &FracArgs) -> errors::Result<Value> {
+    Ok(json!({"f": in_.f, "n": in_.n}))
+}
+
+#[test]
+fn fractional_thresholds_compare_in_float64() {
+    // 上游 v0.2.2 修复：0.5/1.5 类阈值按浮点比较，不再被 int64 截断。
+    let e = Command::new("t.frac", frac_h).entry().unwrap();
+    // 1.4 不满足 gt=1.5（截断语义下 1==1 会误通过 min 类规则）
+    let err = invoke_args(&e, json!({"f": 1.4, "n": 2})).unwrap_err();
+    assert!(err.to_string().contains("gt"), "{err}");
+    assert!(invoke_args(&e, json!({"f": 1.6, "n": 2})).is_ok());
+    // 整数域行为不变
+    let err = invoke_args(&e, json!({"f": 2.0, "n": 1})).unwrap_err();
+    assert!(err.to_string().contains("min"), "{err}");
+}
+
+#[derive(XyzArgs)]
 struct BadRule {
     #[xyz(desc = "x", validate = "explode=1")]
     x: String,

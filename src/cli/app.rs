@@ -140,6 +140,9 @@ impl App {
         }
         let bin = bin_name();
         for arg in args {
+            if arg == "--" {
+                break; // 之后的 token 全是位置参数，-v 不再算开关
+            }
             if arg == "-v" || arg == "--version" {
                 let _ = writeln!(
                     self.out.lock().unwrap(),
@@ -152,12 +155,17 @@ impl App {
         }
         let mut json_out = false;
         let mut filtered: Vec<String> = Vec::with_capacity(args.len());
+        let mut past_double_dash = false;
         for arg in args {
-            if arg == "--json" {
-                json_out = true;
-                continue;
+            match arg.as_str() {
+                "--" => {
+                    past_double_dash = true;
+                    filtered.push(arg.clone());
+                }
+                _ if past_double_dash => filtered.push(arg.clone()),
+                "--json" => json_out = true,
+                _ => filtered.push(arg.clone()),
             }
-            filtered.push(arg.clone());
         }
         if let Err(e) = self.execute(ctx, self.root.clone(), &filtered, json_out, &bin) {
             let _ = writeln!(self.err_out.lock().unwrap(), "{e}");

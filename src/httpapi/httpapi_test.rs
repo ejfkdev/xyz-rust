@@ -75,17 +75,60 @@ async fn binding_merges_body_path_query_header() {
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn invalid_json_body_is_400() {
+async fn invalid_declared_json_body_is_400() {
     let reg = add_reg();
     let router = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+    // 显式声明 application/json 且解析失败 → 严格 400
     let req = Request::builder()
         .method("POST")
         .uri("/users/alice")
+        .header("content-type", "application/json")
         .body(Body::from("{nope".to_string()))
         .unwrap();
     let (status, out) = call(router, req).await;
     assert_eq!(status, 400);
     assert!(out.contains("invalid JSON body"), "{out}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn undeclared_body_is_not_rejected_as_json() {
+    // 非 JSON 声明的不可解析体（如表单体）不提前判死：交给 form 绑定/其余字段。
+    let reg = Registry::new();
+
+    #[derive(XyzArgs)]
+    struct F {
+        #[xyz(desc = "n", http = "form")]
+        note: String,
+    }
+    fn fh(_: &Ctx, in_: &F) -> errors::Result<String> {
+        Ok(format!("note={}", in_.note))
+    }
+    Command::new("f.submit", fh)
+        .http(HTTPHints {
+            method: "POST".into(),
+            path: "/f".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let router = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+    // 无 Content-Type 的 form 体可以解出，不落 400
+    let req = Request::builder()
+        .method("POST")
+        .uri("/f")
+        .body(Body::from("note=hello%20form".to_string()))
+        .unwrap();
+    let (status, out) = call(router.clone(), req).await;
+    assert_eq!(status, 200);
+    assert_eq!(out.trim(), "\"note=hello form\"");
+    // form 值只取请求体，不混入 query（与上游 v0.2.2 一致）
+    let req = Request::builder()
+        .method("POST")
+        .uri("/f?note=fromquery")
+        .body(Body::from("note=frombody".to_string()))
+        .unwrap();
+    let (_, out) = call(router, req).await;
+    assert_eq!(out.trim(), "\"note=frombody\"");
 }
 
 #[tokio::test(flavor = "current_thread")]

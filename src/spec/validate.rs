@@ -189,11 +189,11 @@ pub fn check_vec_rules<T: XyzField>(f: &FieldMeta, v: &[T]) -> errors::Result<()
                 continue;
             }
             "min" | "max" | "len" => {
-                let n = v.len() as i64;
+                let n = v.len() as f64;
                 let ok = match r.key.as_str() {
-                    "min" => n >= r.num as i64,
-                    "max" => n <= r.num as i64,
-                    _ => n == r.num as i64,
+                    "min" => n >= r.num,
+                    "max" => n <= r.num,
+                    _ => n == r.num,
                 };
                 if !ok {
                     return Err(field_rule_error(f, &r.key));

@@ -12,6 +12,11 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
     let mut i = 0;
     while i < args.len() {
         let a = args[i].clone();
+        if a == "--" {
+            // 终止符之后全是位置参数：不再剥内置参数，原样保留。
+            out.extend(args[i..].iter().cloned());
+            break;
+        }
         let matched = match a.as_str() {
             "--xyz.addr" => {
                 cfg.addr = take_value(&args, &mut i, &a)?;

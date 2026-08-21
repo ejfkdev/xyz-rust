@@ -301,6 +301,31 @@ fn middleware_chain_sees_args_and_can_short_circuit() {
 }
 
 #[test]
+fn double_dash_terminator_guards_v_and_json() {
+    let reg = Registry::new();
+
+    #[derive(XyzArgs)]
+    struct P {
+        #[xyz(desc = "a", required, cli = "positional")]
+        a: String,
+    }
+    fn ph(_: &Ctx, in_: &P) -> errors::Result<String> {
+        Ok(in_.a.clone())
+    }
+    Command::new("user.add", ph).register(&reg).unwrap();
+    // "--" 之后全是位置参数：-v / --json 不再是开关
+    let (code, out, _) = run_app(&reg, &["user", "add", "--", "-v"]);
+    assert_eq!(code, 0);
+    assert_eq!(out, "-v\n");
+    let (code, out, _) = run_app(&reg, &["user", "add", "--", "--json"]);
+    assert_eq!(code, 0);
+    assert_eq!(out, "--json\n");
+    // 未带 -- 时版本照旧
+    let (code, _, _) = run_app(&reg, &["-v"]);
+    assert_eq!(code, 0);
+}
+
+#[test]
 fn positional_min_max() {
     let reg = Registry::new();
 

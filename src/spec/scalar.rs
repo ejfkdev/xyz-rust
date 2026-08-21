@@ -359,27 +359,30 @@ pub(crate) fn raw_f64(v: &Value) -> Result<f64, String> {
 }
 
 /// 单条规则的通用判定（validate.rs 的 rule_ok 入口，标量实现共用）。
+// 数值比较统一在 float64 空间进行（对齐上游 xyz-go v0.2.2+）：整数域
+// ≤2^53 无损，浮点域保留小数——避免 int64 截断导致 gt=1.5/min=0.5 这类
+// 小数阈值被按整数比较。
 pub(crate) fn rule_ok_bits(
     r: &VRule,
-    len: Option<i64>,
-    numeric: Option<i64>,
+    len: Option<f64>,
+    numeric: Option<f64>,
     s: &str,
     email: bool,
 ) -> bool {
     match r.key.as_str() {
         "min" | "max" | "len" => len
             .map(|n| match r.key.as_str() {
-                "min" => n >= r.num as i64,
-                "max" => n <= r.num as i64,
-                _ => n == r.num as i64,
+                "min" => n >= r.num,
+                "max" => n <= r.num,
+                _ => n == r.num,
             })
             .unwrap_or(false),
         "gt" | "gte" | "lt" | "lte" => numeric
             .map(|n| match r.key.as_str() {
-                "gt" => n > r.num as i64,
-                "gte" => n >= r.num as i64,
-                "lt" => n < r.num as i64,
-                _ => n <= r.num as i64,
+                "gt" => n > r.num,
+                "gte" => n >= r.num,
+                "lt" => n < r.num,
+                _ => n <= r.num,
             })
             .unwrap_or(false),
         "oneof" => r.args.iter().any(|a| a == s),
@@ -420,7 +423,7 @@ macro_rules! impl_int_field {
                 *self == 0
             }
             fn xyz_rule_ok(&self, r: &VRule) -> bool {
-                let n = *self as i64;
+                let n = *self as f64;
                 rule_ok_bits(r, Some(n), Some(n), &self.xyz_fmt(), false)
             }
             fn xyz_fmt(&self) -> String {
@@ -465,7 +468,7 @@ macro_rules! impl_float_field {
                 *self == 0.0
             }
             fn xyz_rule_ok(&self, r: &VRule) -> bool {
-                let n = *self as i64; // Go numericOf 截断语义
+                let n = *self as f64;
                 rule_ok_bits(r, Some(n), Some(n), &self.xyz_fmt(), false)
             }
             fn xyz_fmt(&self) -> String {
@@ -546,7 +549,7 @@ impl XyzField for String {
         self.is_empty()
     }
     fn xyz_rule_ok(&self, r: &VRule) -> bool {
-        rule_ok_bits(r, Some(self.len() as i64), None, self, true)
+        rule_ok_bits(r, Some(self.len() as f64), None, self, true)
     }
     fn xyz_fmt(&self) -> String {
         self.clone()
@@ -608,9 +611,7 @@ impl XyzField for Duration {
         self.is_zero()
     }
     fn xyz_rule_ok(&self, r: &VRule) -> bool {
-        let n = (self.as_secs() as i64)
-            .saturating_mul(1_000_000_000)
-            .saturating_add(self.subsec_nanos() as i64);
+        let n = (self.as_secs() as f64) * 1e9 + self.subsec_nanos() as f64;
         rule_ok_bits(r, Some(n), Some(n), &self.xyz_fmt(), false)
     }
     fn xyz_fmt(&self) -> String {
@@ -713,7 +714,7 @@ impl XyzField for Vec<u8> {
     fn xyz_rule_ok(&self, r: &VRule) -> bool {
         match r.key.as_str() {
             "min" | "max" | "len" => {
-                let n = self.len() as i64;
+                let n = self.len() as f64;
                 rule_ok_bits(r, Some(n), None, &self.xyz_fmt(), false)
             }
             "oneof" => false,
