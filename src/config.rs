@@ -45,7 +45,8 @@ pub struct Config {
     /// 库自身诊断的日志级别（logx 输出到 stderr）。零值（LevelUnset）
     /// 保持默认 Info。命令行：--xyz.log-level=debug|info|warn|error。
     pub log_level: crate::logx::Level,
-    /// serve 模式的读/写/空闲超时；0 表示只保留 10s 的请求头超时。
+    /// serve 模式的每请求超时（TimeoutLayer）；0 = 不设超时。
+    /// （标准头超时在 Rust 实现里未单独配置，见 README 与 Go 版差异节。）
     pub timeout: Duration,
     /// cert_file/key_file 同时给定则 serve 以 TLS 监听
     /// （--xyz.tls-cert/--xyz.tls-key）。

@@ -40,7 +40,8 @@
 //!
 //! ```text
 //! <app> [命令] ...          -> CLI 前端（子命令、flag、位置参数、-h / -v）
-//! <app> mcp stdio|sse|http  -> MCP 前端（官方 SDK；--versions 钉定协议版本）
+//! <app> mcp stdio|http       -> MCP 前端（官方 SDK；--versions 钉定协议版本；sse 随
+//!                                 2026-07-28 修订从官方 Rust SDK 移除，报错退出）
 //! <app> serve [--addr ...]  -> HTTP 前端（REST + /openapi.json + /mcp）
 //! <app> （无参数）| help    -> 总览（列出三种形态与命令表）
 //! ```
