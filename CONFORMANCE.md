@@ -1,6 +1,6 @@
 # Conformance — xyz-rust
 
-Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.1.0**.
+Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.1.1**.
 
 Status: **conformant (baseline anchor)** — xyz-rust is one of the two
 reference implementations the specification was written from.
@@ -31,8 +31,9 @@ sum`, `math div`, `/healthz`) additionally cross-checked against xyz-go
 The fixture program runs with
 `cargo run -p xyz-example -- <command>`; all commands of the §3.2 matrix
 behave as specified, including `search query --query golang` (CLI default
-k=25), the SHA-256 `file hash` answer, and the rejection of `mcp sse`
-(codified by spec §12.3 — see D-rust-06).
+k=25), the SHA-256 `file hash` answer, the rejection of `mcp sse`
+(codified by spec §12.3 — see D-rust-06), and the default-subcommand
+forwarding of §10.1 (`cli::cli_test::default_subcommand_forwards_all_args`).
 
 ## Deviations
 
