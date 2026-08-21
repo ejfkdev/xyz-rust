@@ -248,7 +248,7 @@ With `no_cli`, user subcommands disappear but `mcp stdio`, `serve`, `help` and `
 
 ## Built-in configuration (`--xyz.*` and `Config` fields)
 
-The library's own settings live in `Config` fields and the `--xyz.*` command-line namespace; precedence: **mode-local flag > global `--xyz.*` / code Config > library defaults**. Inside `serve`/`mcp` the mode word _is_ the namespace, so built-ins use bare names (`--bearer`, `--addr`, `--cors`, …), and the prefixed `--xyz.*` forms work anywhere on the command line. Renaming the mode words migrates the namespace with them.
+The library's own settings live in `Config` fields and the `--xyz.*` command-line namespace; precedence: **mode-local flag > global `--xyz.*` / code Config > library defaults**. Inside `serve`/`mcp` the mode word _is_ the namespace, so built-ins use bare names (`--bearer`, `--addr`, `--cors`, …), and the prefixed `--xyz.*` forms work anywhere before the `--` terminator. Renaming the mode words migrates the namespace with them.
 
 | Parameter | Code field | Meaning |
 |---|---|---|
@@ -310,6 +310,8 @@ Already on clap / axum? See the [migration guide](docs/adapters.md) with a runna
 7. **HTTP semantics.** Gzip via `tower-http` (compresses any response size and handles `Accept-Encoding` q-values; the Go port only checks the header); per-request timeout via `TimeoutLayer` answering **408** (not 504); request-level cancellation: a client disconnect does not interrupt the running handler; the standard header timeout is not configured (a non-zero `Config.timeout` is the only timeout layer).
 8. **MCP differences.** `--versions` accepts the same full set as Go — `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`, `2026-07-28` (newest) — but version pinning is handed to the SDK's negotiation via `supported_protocol_versions`; streamable HTTP serves 2026-07-28 only with `--stateless`; and the SDK's streamable-HTTP server allows only loopback `Host` headers by default (rmcp's DNS-rebinding protection).
 9. **Capability switches stay available at runtime**: `Capabilities { no_cli, no_mcp, no_http }` are `Config` fields, independent of the Cargo features.
+
+All of the above are filed, with spec-section references, in the spec repository's [deviations register](https://github.com/ejfkdev/xyz-spec/blob/main/deviations.md) (`D-rust-01` … `D-rust-11`) and attested in [CONFORMANCE.md](CONFORMANCE.md).
 
 ## Dependency policy & binary size
 

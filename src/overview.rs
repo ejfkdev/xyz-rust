@@ -61,7 +61,7 @@ pub fn print_overview(
     }
     let _ = writeln!(buf);
     let _ = writeln!(buf, "命令:");
-    let width = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
+    let width = names.iter().map(|n| n.len()).max().unwrap_or(0);
     for n in &names {
         let summary = reg.get(n).map(|e| e.summary.clone()).unwrap_or_default();
         let _ = writeln!(buf, "  {n:<width$}  {summary}");

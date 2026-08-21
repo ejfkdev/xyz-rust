@@ -122,6 +122,16 @@ fn format_cell_variants() {
 }
 
 #[test]
+fn cjk_padding_matches_go_width_semantics() {
+    // Go：宽度按字节计（len()）、填充按字符计（%-*s）；CJK 键需逐字节一致。
+    let mut buf = Vec::new();
+    render_value(&mut buf, &serde_json::json!({"\u{540d}\u{5b57}": "v"})).unwrap();
+    let out = String::from_utf8(buf).unwrap();
+    // "名字" 2 字符 6 字节 → 补 4 空格到 6 字符，再接双空格槽位
+    assert_eq!(out, "\u{540d}\u{5b57}      v\n");
+}
+
+#[test]
 fn render_generic_serialize() {
     let mut buf = Vec::new();
     crate::cli::render(&mut buf, &serde_json::json!({"z": 1, "a": "x"})).unwrap();

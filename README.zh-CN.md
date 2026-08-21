@@ -249,7 +249,7 @@ xyz_rust::main_config(xyz_rust::Config {
 
 ## 内置配置（--xyz.* 与 Config 字段）
 
-库自身的配置集中在 `Config` 字段与命令行 `--xyz.*` 命名空间，优先级：**模式局部 flag > 全局 `--xyz.*` / 代码 Config > 内置默认**。`serve`/`mcp` 内部模式词就是命名空间，内置参数用裸名（`--bearer`/`--addr`/`--cors`/…），前缀 `--xyz.*` 形式可用于命令行任意位置；模式词改名后命名空间随之迁移。
+库自身的配置集中在 `Config` 字段与命令行 `--xyz.*` 命名空间，优先级：**模式局部 flag > 全局 `--xyz.*` / 代码 Config > 内置默认**。`serve`/`mcp` 内部模式词就是命名空间，内置参数用裸名（`--bearer`/`--addr`/`--cors`/…），前缀 `--xyz.*` 形式可用于命令行任意位置（`--` 终止符之后除外）；模式词改名后命名空间随之迁移。
 
 | 参数 | 代码字段 | 语义 |
 |---|---|---|
@@ -310,7 +310,12 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 6. **版本注入**：发布期调用 `set_version("v1.2.3")`——Rust 没有 `-ldflags -X` 注入，默认取 `CARGO_PKG_VERSION`。
 7. **HTTP 语义**：Gzip 用 `tower-http`（任意体积响应都压缩，且完整处理 `Accept-Encoding` 的 q 值；Go 只查头）；每请求超时经 `TimeoutLayer` 应答 **408**（而非 504）；请求级取消——客户端断开不打断 handler 执行；标准头超时未配置（非零 `Config.timeout` 是唯一超时层）。
 8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）。
-9. **能力开关运行时仍可用**：`Capabilities { no_cli, no_mcp, no_http }` 是 `Config` 字段，与 Cargo features 相互独立。
+9. **能力开关在运行时仍然可用**：`Capabilities { no_cli, no_mcp, no_http }` 是 `Config` 字段，与 Cargo features 相互独立。
+
+以上全部差异连同规范章节引用，登记在规范仓库的
+[差异登记表](https://github.com/ejfkdev/xyz-spec/blob/main/deviations.md)
+（`D-rust-01` … `D-rust-11`），并在 [CONFORMANCE.md](CONFORMANCE.md)
+中向规范 v0.1.0 宣誓。
 
 ## 依赖原则与体积
 
@@ -358,7 +363,7 @@ strip target/release/xyz-example
 3. **配置是数据，通道是消费方**：`.cli()/.http()/.mcp()` 只是往元数据里存数据，因此 Cargo features 与能力开关任意裁剪都不影响代码编译。
 4. **渲染没有信封、有自然形态**：机器读 JSON、人类读表格，同一份返回值。
 5. **壳能力不可裁**：`help`/`-v`/模式词/`completion` 在任何组合下可用。
-6. **模式词即命名空间**：`serve`/`mcp` 下的内置参数用裸名（`--bearer`/`--addr`/`--cors`），任意位置可用 `--xyz.*` 全局形式；优先级 = 模式局部 > 全局 / 代码 Config > 内置默认。库内文案不写死模式词——改名后命名空间随之迁移。
+6. **模式词即命名空间**：`serve`/`mcp` 下的内置参数用裸名（`--bearer`/`--addr`/`--cors`），任意位置（`--` 之后除外）可用 `--xyz.*` 全局形式；优先级 = 模式局部 > 全局 / 代码 Config > 内置默认。库内文案不写死模式词——改名后命名空间随之迁移。
 7. **取消语义贯通**：分发入口持有信号 `Ctx`，一路流入 CLI/HTTP/MCP 的 handler；HTTP 与 MCP 服务在退出前优雅排空在途请求。
 
 ## 开发

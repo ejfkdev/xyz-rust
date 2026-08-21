@@ -77,7 +77,9 @@ fn render_kv(w: &mut dyn Write, o: &serde_json::Map<String, Value>) -> errors::R
     if o.is_empty() {
         return Ok(());
     }
-    let width = o.keys().map(|k| k.chars().count()).max().unwrap_or(0);
+    // 宽度按字节计（Go 的 len()），填充按字符计（Go 的 %-*s）——两者合一
+    // 才能与 Go 的 CJK 对齐逐字节一致。
+    let width = o.keys().map(|k| k.len()).max().unwrap_or(0);
     for (k, v) in o {
         writeln!(w, "{k:<width$}  {}", format_cell(v))?;
     }
@@ -93,7 +95,7 @@ fn render_table(w: &mut dyn Write, items: &[Value]) -> errors::Result<()> {
     if keys.is_empty() {
         return Ok(());
     }
-    let mut widths: Vec<usize> = keys.iter().map(|k| k.chars().count()).collect();
+    let mut widths: Vec<usize> = keys.iter().map(|k| k.len()).collect();
     let mut rows: Vec<Vec<String>> = Vec::with_capacity(items.len());
     for item in items {
         let mut row = Vec::with_capacity(keys.len());
@@ -101,7 +103,7 @@ fn render_table(w: &mut dyn Write, items: &[Value]) -> errors::Result<()> {
             Some(o) => {
                 for (j, k) in keys.iter().enumerate() {
                     let cell = o.get(*k).map(format_cell).unwrap_or_default();
-                    widths[j] = widths[j].max(cell.chars().count());
+                    widths[j] = widths[j].max(cell.len());
                     row.push(cell);
                 }
             }

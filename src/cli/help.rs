@@ -58,11 +58,7 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
         writeln!(w)?;
         writeln!(w, "命令:")?;
         let visible: Vec<&CmdNode> = node.children.iter().filter(|c| !c.hidden).collect();
-        let width = visible
-            .iter()
-            .map(|c| c.segment.chars().count())
-            .max()
-            .unwrap_or(0);
+        let width = visible.iter().map(|c| c.segment.len()).max().unwrap_or(0);
         for child in visible {
             writeln!(w, "  {:<width$}  {}", child.segment, child.short)?;
         }
@@ -101,7 +97,7 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
 }
 
 fn print_rows(w: &mut dyn Write, rows: &[(String, String)]) -> errors::Result<()> {
-    let width = rows.iter().map(|r| r.0.chars().count()).max().unwrap_or(0);
+    let width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0);
     for (name, desc) in rows {
         if desc.is_empty() {
             writeln!(w, "  {name}")?;
