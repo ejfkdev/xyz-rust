@@ -55,6 +55,11 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                 cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), &v);
                 true
             }
+            "--xyz.default" => {
+                let v = take_value(&args, &mut i, &a)?;
+                merge_default_pairs(&mut cfg.channel_defaults, &v)?;
+                true
+            }
             "--xyz.lang" => {
                 let v = take_value(&args, &mut i, &a)?;
                 if crate::lang::XyzLang::parse(&v).is_none() {
@@ -94,6 +99,9 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                 } else if let Some(v) = a.strip_prefix("--xyz.cors=") {
                     cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), v);
                     true
+                } else if let Some(v) = a.strip_prefix("--xyz.default=") {
+                    merge_default_pairs(&mut cfg.channel_defaults, v)?;
+                    true
                 } else if let Some(v) = a.strip_prefix("--xyz.lang=") {
                     if crate::lang::XyzLang::parse(v).is_none() {
                         return Err(errors::Error::new(
@@ -127,6 +135,30 @@ fn take_value(args: &[String], i: &mut usize, flag: &str) -> errors::Result<Stri
     Ok(args[*i].clone())
 }
 
+/// 解析 "k=v,a=b" 形式的默认参数对。
+pub fn merge_default_pairs(
+    target: &mut std::collections::HashMap<String, String>,
+    flag: &str,
+) -> errors::Result<()> {
+    for pair in flag.split(',').map(str::trim).filter(|p| !p.is_empty()) {
+        let Some((k, v)) = pair.split_once('=') else {
+            return Err(errors::Error::new(
+                errors::Kind::Internal,
+                format!("invalid --default {pair:?} (want key=value)"),
+            ));
+        };
+        let k = k.trim();
+        if k.is_empty() {
+            return Err(errors::Error::new(
+                errors::Kind::Internal,
+                format!("invalid --default {pair:?} (want key=value)"),
+            ));
+        }
+        target.insert(k.to_string(), v.to_string());
+    }
+    Ok(())
+}
+
 /// serve 模式的裸名 flag 解析（--addr/--bearer/--timeout/--tls-*/--cors）；
 /// 全局 --xyz.* 与代码 Config 已由根派发器折叠进 cfg。
 pub fn parse_serve_args(args: &[String], mut cfg: Config) -> Config {
@@ -137,7 +169,8 @@ pub fn parse_serve_args(args: &[String], mut cfg: Config) -> Config {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
-            "--addr" | "--bearer" | "--timeout" | "--tls-cert" | "--tls-key" | "--cors" => {
+            "--addr" | "--bearer" | "--timeout" | "--tls-cert" | "--tls-key" | "--cors"
+            | "--default" => {
                 let Some(v) = args.get(i + 1) else { break };
                 i += 1;
                 match a {
@@ -150,6 +183,9 @@ pub fn parse_serve_args(args: &[String], mut cfg: Config) -> Config {
                     }
                     "--tls-cert" => cfg.cert_file = v.clone(),
                     "--tls-key" => cfg.key_file = v.clone(),
+                    "--default" => {
+                        let _ = merge_default_pairs(&mut cfg.channel_defaults, v);
+                    }
                     _ => cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), v),
                 }
             }
@@ -168,6 +204,8 @@ pub fn parse_serve_args(args: &[String], mut cfg: Config) -> Config {
                     cfg.key_file = v.to_string();
                 } else if let Some(v) = other.strip_prefix("--cors=") {
                     cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), v);
+                } else if let Some(v) = other.strip_prefix("--default=") {
+                    let _ = merge_default_pairs(&mut cfg.channel_defaults, v);
                 }
             }
         }

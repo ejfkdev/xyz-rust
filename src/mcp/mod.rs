@@ -73,6 +73,9 @@ pub struct Options {
     /// serve 模式 /mcp 挂载时注入的取消上下文（内部使用）。
     #[doc(hidden)]
     pub default_ctx: Option<Arc<Ctx>>,
+
+    /// 通道级默认参数（--default k=v）：调用未显式提供时补上。
+    pub defaults: std::collections::HashMap<String, String>,
 }
 
 /// 构建服务器实现：每条注册命令一个工具，inputSchema 直接来自注册表的

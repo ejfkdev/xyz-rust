@@ -31,7 +31,7 @@ fn build_doc(reg: &Registry) -> Value {
     let mut paths: Map<String, Value> = Map::new();
     let mut order: Vec<String> = Vec::new();
     for e in reg.all() {
-        if e.http.method.is_empty() || e.http.path.is_empty() {
+        if e.http.skip || e.http.method.is_empty() || e.http.path.is_empty() {
             continue;
         }
         order.push(format!("{} {}", e.http.path, e.http.method));

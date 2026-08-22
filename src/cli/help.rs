@@ -3,7 +3,6 @@
 
 use std::io::Write;
 
-use crate::cli::parse::FlagKind;
 use crate::cli::tree::CmdNode;
 use crate::errors;
 use crate::spec::field::FieldMeta;
@@ -77,11 +76,7 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
             if let Some(sh) = d.short {
                 name = format!("-{sh}, {name}");
             }
-            let typ = match d.kind {
-                FlagKind::Bool => "bool",
-                FlagKind::Slice => "strings",
-                FlagKind::Str => "string",
-            };
+            let typ = flag_type_name(d);
             rows.push((format!("{name} {typ}"), flag_description(&d.field)));
         }
         print_rows(w, &rows)?;
@@ -113,6 +108,22 @@ pub fn write_help_block(w: &mut dyn Write, s: &str) -> errors::Result<()> {
         return Ok(());
     }
     writeln!(w, "{}", s.trim_end_matches('\n')).map_err(errors::Error::from)
+}
+
+/// 按字段类型保真渲染帮助里的 flag 类型；切片同时标注可重复。
+fn flag_type_name(d: &crate::cli::parse::FlagDef) -> &'static str {
+    use crate::spec::field::FieldKind as K;
+    match d.kind {
+        crate::cli::parse::FlagKind::Bool => "bool",
+        crate::cli::parse::FlagKind::Slice => "strings (repeatable)",
+        crate::cli::parse::FlagKind::Str => match d.field.kind {
+            K::I8 | K::I16 | K::I32 | K::I64 | K::U8 | K::U16 | K::U32 | K::U64 => "integer",
+            K::F32 | K::F64 => "number",
+            K::Duration => "duration",
+            K::Time => "time",
+            _ => "string",
+        },
+    }
 }
 
 fn print_rows(w: &mut dyn Write, rows: &[(String, String)]) -> errors::Result<()> {

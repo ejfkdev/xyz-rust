@@ -62,20 +62,59 @@ pub fn run(reg: &Registry, args: Vec<String>) -> i32 {
 
 /// 带自定义配置的 run（重命名模式词、通道能力）。
 pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
+    run_internal(reg, args, cfg, false).0
+}
+
+/// 可组合派发：与 run_config 同管线，但当参数进入 CLI 模式且首段不是任何
+/// 已注册命令段/别名（也不是 flag）时，不打印任何东西、返回 (0, false)，
+/// 由宿主路由其余参数（false 即「未命中」）。其余路径行为与 run_config
+/// 完全一致。
+pub fn try_run(reg: &Registry, args: Vec<String>) -> (i32, bool) {
+    try_run_config(reg, args, Config::default())
+}
+
+/// 带自定义配置的 try_run。
+pub fn try_run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> (i32, bool) {
+    run_internal(reg, args, cfg, true)
+}
+
+/// CLI 首段是否命中树（已知命令段、别名或 default 子命令）。
+fn cli_known_top(reg: &Registry, first: &str) -> bool {
+    if first.starts_with('-') {
+        return true; // flag/帮助等交给 CLI 自身路径
+    }
+    for e in reg.all() {
+        if e.cli.skip {
+            continue;
+        }
+        if e.name.split('.').next() == Some(first) {
+            return true;
+        }
+        if e.cli.aliases.iter().any(|a| a == first) {
+            return true;
+        }
+        if e.cli.default {
+            return true; // 默认子命令吞掉未知名
+        }
+    }
+    false
+}
+
+fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool) -> (i32, bool) {
     let (serve, mcp_word, help_word) = match resolve_modes(&cfg) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{e}");
-            return 2;
+            return (2, true);
         }
     };
     if let Err(e) = check_reserved(reg, &serve, &mcp_word, &help_word) {
         eprintln!("{e}");
-        return 2;
+        return (2, true);
     }
     // 没有任何已注册命令：什么都不做，静默退出 0。
     if reg.names().is_empty() {
-        return 0;
+        return (0, true);
     }
     // 壳能力：-v/--version 由根派发器管，任何能力组合下都可用
     // （"--" 之后的 token 一律是位置参数，不再识别 -v）。
@@ -86,7 +125,7 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
         if a == "-v" || a == "--version" {
             let bin = crate::cli::app::bin_name();
             println!("{bin} version {}", crate::version::version());
-            return 0;
+            return (0, true);
         }
     }
     // 内置参数 --xyz.*：剥离开分发给各前端（帮助/版本不受影响）。
@@ -95,7 +134,7 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
         Ok(a) => a,
         Err(e) => {
             eprintln!("xyz: {e}");
-            return 2;
+            return (2, true);
         }
     };
     if cfg.log_level != crate::logx::Level::Unset {
@@ -107,7 +146,7 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
             Some(l) => l,
             None => {
                 eprintln!("xyz: invalid --xyz.lang {:?} (want en|zh-CN)", cfg.lang);
-                return 2;
+                return (2, true);
             }
         }
     } else {
@@ -128,7 +167,7 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
             &cfg.help_before,
             &cfg.help_after,
         );
-        return 0;
+        return (0, true);
     }
     // 优雅关停：信号取消的 ctx 贯穿 CLI/HTTP/MCP，长任务可在退出前排空。
     let ctx = Ctx::new();
@@ -144,29 +183,35 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
     if args[0] == serve {
         if cfg.capabilities.no_http {
             crate::logx::warnf(format_args!(
-                "{serve} 模式已被禁用（Config.Capabilities.NoHTTP）"
+                "{}",
+                crate::lang::tf("warn.mode_disabled", &[&serve, "HTTP"])
             ));
-            return 1;
+            return (1, true);
         }
-        return run_serve(&ctx, reg, &args[1..], cfg);
+        return (run_serve(&ctx, reg, &args[1..], cfg), true);
     }
     if args[0] == mcp_word {
         if cfg.capabilities.no_mcp {
             crate::logx::warnf(format_args!(
-                "{mcp_word} 模式已被禁用（Config.Capabilities.NoMCP）"
+                "{}",
+                crate::lang::tf("warn.mode_disabled", &[&mcp_word, "MCP"])
             ));
-            return 1;
+            return (1, true);
         }
-        return run_mcp(&ctx, reg, &args[1..], cfg);
+        return (run_mcp(&ctx, reg, &args[1..], cfg), true);
     }
     if cfg.capabilities.no_cli {
         crate::logx::warnf(format_args!(
             "{}",
             crate::lang::tf("warn.no_cli", &[&mcp_word, &serve])
         ));
-        return 1;
+        return (1, true);
     }
-    run_cli(&ctx, reg, &args)
+    if composable && !args.is_empty() && !cli_known_top(reg, &args[0]) {
+        // 宿主兜底：静默交还，不做任何输出。
+        return (0, false);
+    }
+    (run_cli(&ctx, reg, &args), true)
 }
 
 /// resolveModes 默认并校验模式词：必须是无前导横线的普通词且两两不同。

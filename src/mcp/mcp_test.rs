@@ -39,6 +39,7 @@ fn reg() -> Registry {
         .summary("求和")
         .description("两个整数相加")
         .mcp(MCPHints {
+            skip: false,
             annotations: vec!["read".into(), "title:求和工具".into(), "destructive".into()],
             fields: std::collections::HashMap::from([(
                 "k".to_string(),

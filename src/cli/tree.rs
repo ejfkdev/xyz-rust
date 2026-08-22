@@ -86,6 +86,9 @@ fn add_entry(root: &mut CmdNode, e: &Arc<Entry>) -> errors::Result<()> {
 }
 
 fn add_parts(node: &mut CmdNode, parts: &[&str], idx: usize, e: &Arc<Entry>) -> errors::Result<()> {
+    if e.cli.skip {
+        return Ok(()); // 通道层面整体移除：不建子命令、别名、completion
+    }
     let part = parts[idx];
     let is_leaf_segment = idx == parts.len() - 1;
     if !is_leaf_segment {

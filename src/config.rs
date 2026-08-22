@@ -63,6 +63,11 @@ pub struct Config {
     /// （xyz-spec §15.8 的规范键表）。
     pub translations: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
 
+    /// serve/mcp 启动时注入的通道级默认参数（字段线上名 → 字符串值）：
+    /// 请求/调用未显式提供时自动补上，优先级高于全局 default 属性、低于
+    /// 显式入参与接口默认。命令行：--default k=v（可重复/逗号分隔对）。
+    pub channel_defaults: std::collections::HashMap<String, String>,
+
     /// help 总览的自定义文本块：前者原样插在总览开头（程序名/描述/版本/
     /// 仓库地址等自己拼），后者插在结尾（命令表之后，即使命令表被隐藏也
     /// 打印）。空 = 不插入。

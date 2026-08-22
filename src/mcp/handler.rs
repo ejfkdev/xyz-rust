@@ -31,6 +31,7 @@ pub struct XyzServer {
     pinned: Option<Vec<ProtocolVersion>>,
     allowed: Option<std::collections::BTreeSet<String>>,
     pub(crate) ctx: Arc<Ctx>,
+    defaults: std::collections::HashMap<String, String>,
 }
 
 /// 构建服务器实现。未登记的协议版本在注册期报错（与「注册期即报错」
@@ -74,6 +75,9 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
     let mut tools = Vec::new();
     let mut by_name = BTreeMap::new();
     for e in reg.all() {
+        if e.mcp.skip {
+            continue; // 通道层面整体移除：不成为工具
+        }
         let input_schema = Arc::new(
             crate::spec::schema::schema_to_value(&e.input_schema)
                 .as_object()
@@ -115,6 +119,7 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
         pinned,
         allowed,
         ctx,
+        defaults: opts.defaults.clone(),
     })
 }
 
@@ -145,7 +150,10 @@ impl ServerHandler for XyzServer {
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
-        self.tools.iter().find(|t| t.name == name).cloned()
+        self.tools
+            .iter()
+            .find(|t| t.name == name && self.by_name.contains_key(name))
+            .cloned()
     }
 
     async fn call_tool(
@@ -181,6 +189,12 @@ impl ServerHandler for XyzServer {
         for (k, v) in entry.mcp_defaults() {
             if !arguments.contains_key(&k) {
                 arguments.insert(k, v);
+            }
+        }
+        // 通道级默认参数（--default k=v）：只补缺席键。
+        for (k, v) in &self.defaults {
+            if !arguments.contains_key(k) {
+                arguments.insert(k.clone(), serde_json::Value::String(v.clone()));
             }
         }
         match (entry.invoke)(&self.ctx, &arguments) {

@@ -15,6 +15,17 @@ pub fn parse_args(args: &[String]) -> errors::Result<(String, Options)> {
     while i < args.len() {
         let a = args[i].as_str();
         match a {
+            "--default" => {
+                let Some(v) = args.get(i + 1) else { break };
+                i += 1;
+                crate::builtins::merge_default_pairs(&mut opts.defaults, v)?;
+            }
+            _ if a.starts_with("--default=") => {
+                crate::builtins::merge_default_pairs(
+                    &mut opts.defaults,
+                    a.trim_start_matches("--default="),
+                )?;
+            }
             "--json-response" => opts.json_response = true,
             "--stateless" => opts.stateless = true,
             _ if a.starts_with("--addr=") => {
@@ -152,6 +163,9 @@ impl Options {
         }
         if self.cors_origins.is_empty() {
             self.cors_origins = base.cors_origins.clone();
+        }
+        if self.defaults.is_empty() {
+            self.defaults = base.defaults.clone();
         }
         self.json_response = self.json_response || base.json_response;
         self.stateless = self.stateless || base.stateless;

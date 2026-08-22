@@ -34,6 +34,9 @@ pub struct CliHints {
     /// flag）时，整串参数不消费地转发给它（udf image.tar ⇔
     /// udf extract image.tar，当 extract 标记了 default）。
     pub default: bool,
+    /// 从 CLI 通道整体移除该命令：不建子命令、别名不生效、不出现在
+    /// completion。与 hidden 的区别：hidden 只藏帮助、仍可执行。
+    pub skip: bool,
     /// `-h` 帮助的自定义文本块：分别插在帮助最前（description 之前）与
     /// 最后（Global Flags 之后）。原样输出（多行、缩进自控；结尾换行归一）。
     /// 空 = 不插入。仅叶子命令生效（中间节点没有 CliHints）。
@@ -65,6 +68,8 @@ pub struct HTTPHints {
     pub path: String,
     /// 每请求超时覆盖；0 保持前端默认。
     pub timeout: Duration,
+    /// 从 HTTP 通道整体移除该命令：不注册路由、不进 /openapi.json。
+    pub skip: bool,
     pub fields: HashMap<String, HTTPFieldHint>,
 }
 
@@ -83,6 +88,8 @@ pub struct HTTPFieldHint {
 pub struct MCPHints {
     /// 形如 "read"、"write"、"destructive"、"title:创建用户"。
     pub annotations: Vec<String>,
+    /// 从 MCP 通道整体移除该命令：不成为工具。
+    pub skip: bool,
     pub fields: HashMap<String, MCPFieldHint>,
 }
 

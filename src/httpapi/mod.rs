@@ -42,9 +42,21 @@ pub const MAX_BODY_BYTES: usize = 1 << 20;
 /// method+path 冲突是注册期错误（Go 用 recover 包 mux panic 转错误，
 /// 这里显式前置检查，行为等价）。
 pub fn router(reg: &Registry, ctx: Arc<Ctx>) -> errors::Result<Router> {
+    router_with(reg, ctx, std::collections::HashMap::new())
+}
+
+/// 带通道级默认参数的路由器（serve --default k=v：缺席键补上）。
+pub(crate) fn router_with(
+    reg: &Registry,
+    ctx: Arc<Ctx>,
+    defaults: std::collections::HashMap<String, String>,
+) -> errors::Result<Router> {
     let mut r: Router = Router::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
     for e in reg.all() {
+        if e.http.skip {
+            continue; // 通道层面整体移除
+        }
         if e.http.method.is_empty() || e.http.path.is_empty() {
             continue; // 该命令没有声明 HTTP 路由（CLI/MCP 专用）
         }
@@ -57,7 +69,7 @@ pub fn router(reg: &Registry, ctx: Arc<Ctx>) -> errors::Result<Router> {
                 ),
             ));
         }
-        let h = handle_entry_c(e.clone(), Arc::clone(&ctx));
+        let h = handle_entry_c(e.clone(), Arc::clone(&ctx), Arc::new(defaults.clone()));
         let mr = method_router(&e.http.method, h)?;
         r = r.route(&e.http.path, mr);
     }
@@ -100,25 +112,43 @@ where
 pub struct EntryHandler {
     pub(crate) entry: Arc<Entry>,
     pub(crate) ctx: Arc<Ctx>,
+    pub(crate) defaults: Arc<std::collections::HashMap<String, String>>,
 }
 
 impl axum::handler::Handler<(), ()> for EntryHandler {
     type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>;
     fn call(self, req: Request, _state: ()) -> Self::Future {
-        Box::pin(async move { handle_request(self.entry, self.ctx, req).await })
+        Box::pin(async move { handle_request(&self.entry, &self.ctx, &self.defaults, req).await })
     }
 }
 
 pub fn handler_for(entry: Arc<Entry>) -> EntryHandler {
-    handle_entry_c(entry, Arc::new(Ctx::new()))
+    handle_entry_c(
+        entry,
+        Arc::new(Ctx::new()),
+        Arc::new(std::collections::HashMap::new()),
+    )
 }
 
 /// 入口处理器构建（serve 模式注入取消上下文）。
-fn handle_entry_c(entry: Arc<Entry>, ctx: Arc<Ctx>) -> EntryHandler {
-    EntryHandler { entry, ctx }
+fn handle_entry_c(
+    entry: Arc<Entry>,
+    ctx: Arc<Ctx>,
+    defaults: Arc<std::collections::HashMap<String, String>>,
+) -> EntryHandler {
+    EntryHandler {
+        entry,
+        ctx,
+        defaults,
+    }
 }
 
-async fn handle_request(entry: Arc<Entry>, ctx: Arc<Ctx>, req: Request) -> Response {
+async fn handle_request(
+    entry: &Arc<Entry>,
+    ctx: &Arc<Ctx>,
+    defaults: &std::collections::HashMap<String, String>,
+    req: Request,
+) -> Response {
     let (parts, body) = req.into_parts();
     let method = parts.method.clone();
     let path = parts.uri.path().to_string();
@@ -129,6 +159,12 @@ async fn handle_request(entry: Arc<Entry>, ctx: Arc<Ctx>, req: Request) -> Respo
     // 铺底：HTTP 专属默认值（全局默认由 Invoke 补齐）。
     for (k, v) in entry.http_defaults() {
         m.insert(k, v);
+    }
+    // 通道级默认参数（serve --default k=v）：只补缺席键。
+    for (k, v) in defaults.iter() {
+        if !m.contains_key(k) {
+            m.insert(k.clone(), Value::String(v.clone()));
+        }
     }
     // JSON body 作为基础入参（非 GET/HEAD 且带体时解析）。
     let body_bytes: Vec<u8> = if method != Method::GET && method != Method::HEAD {
@@ -375,7 +411,7 @@ async fn collect_body(body: axum::body::Body, cap: usize) -> Vec<u8> {
 pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
     let cfg = crate::builtins::parse_serve_args(args, cfg);
     let sctx = Arc::new(ctx.clone());
-    let mut router = match router(reg, Arc::clone(&sctx)) {
+    let mut router = match router_with(reg, Arc::clone(&sctx), cfg.channel_defaults.clone()) {
         Ok(r) => r,
         Err(e) => {
             crate::logx::errorf(format_args!("{e}"));
@@ -390,6 +426,7 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
             &crate::mcp::Options {
                 bearer_tokens: cfg.bearer_tokens.clone(),
                 default_ctx: Some(sctx.clone()),
+                defaults: cfg.channel_defaults.clone(),
                 ..Default::default()
             },
         ) {
