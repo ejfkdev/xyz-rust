@@ -232,6 +232,65 @@ fn strip_xyz_flags() {
 }
 
 #[test]
+fn lang_resolution_and_catalog() {
+    // 目录随语言切换；覆盖表生效
+    crate::lang::set(crate::lang::XyzLang::En, None);
+    let reg = test_reg(&["a.b"]);
+    let mut buf = Vec::new();
+    crate::overview::print_overview(
+        &mut buf,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "",
+        "",
+    )
+    .unwrap();
+    let out = String::from_utf8(buf).unwrap();
+    assert!(out.contains("Usage (the mode is detected"), "{out}");
+    crate::lang::set(crate::lang::XyzLang::ZhCn, None);
+    let mut buf2 = Vec::new();
+    crate::overview::print_overview(
+        &mut buf2,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "",
+        "",
+    )
+    .unwrap();
+    let out2 = String::from_utf8(buf2).unwrap();
+    assert!(out2.contains("用法（模式由程序自动判断"), "{out2}");
+    // 覆盖表
+    let mut ov = std::collections::HashMap::new();
+    ov.insert("overview.commands".to_string(), "Commands!:".to_string());
+    crate::lang::set(crate::lang::XyzLang::En, Some(ov));
+    let mut buf3 = Vec::new();
+    crate::overview::print_overview(
+        &mut buf3,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "",
+        "",
+    )
+    .unwrap();
+    assert!(String::from_utf8(buf3).unwrap().contains("Commands!:"),);
+    crate::lang::set(crate::lang::XyzLang::En, None);
+
+    // --xyz.lang 非法值在解析期报错
+    let mut cfg = Config::default();
+    assert!(crate::builtins::strip_xyz_flags(args(&["--xyz.lang=fr"]), &mut cfg).is_err());
+    let rest =
+        crate::builtins::strip_xyz_flags(args(&["--xyz.lang=zh-CN", "help"]), &mut cfg).unwrap();
+    assert_eq!(cfg.lang, "zh-CN");
+    assert_eq!(rest, args(&["help"]));
+}
+
+#[test]
 fn overview_help_blocks() {
     // 通过 print_overview 直接断言块插入与归一化
     let reg = test_reg(&["a.b"]);
@@ -301,7 +360,10 @@ fn overview_help_blocks() {
     )
     .unwrap();
     let ds = String::from_utf8(d).unwrap();
-    assert!(ds.starts_with("a\nb\n用法"), "{ds:?}");
+    assert!(
+        ds.starts_with(&format!("a\nb\n{}", crate::lang::t("overview.usage_line"))),
+        "{ds:?}"
+    );
 }
 
 #[test]

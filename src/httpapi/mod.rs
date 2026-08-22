@@ -398,7 +398,10 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
         }
     }
     if !cfg.cors_origins.is_empty() {
-        crate::logx::debugf(format_args!("CORS 开启：{:?}", cfg.cors_origins));
+        crate::logx::debugf(format_args!(
+            "{}",
+            crate::lang::tf("log.cors_on", &[&format!("{:?}", cfg.cors_origins)])
+        ));
     }
     // 中间件链（由外到内）：CORS 预检（鉴权前，浏览器预检不带凭据）→
     // Bearer → Gzip → 路由。顺序语义在 middleware.rs 集中组装并有测试锁定。
@@ -411,13 +414,13 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
 
     let tls_on = !cfg.cert_file.is_empty() || !cfg.key_file.is_empty();
     if tls_on && (cfg.cert_file.is_empty() || cfg.key_file.is_empty()) {
-        crate::logx::errorf(format_args!("TLS 需要同时给定 --tls-cert 与 --tls-key"));
+        crate::logx::errorf(format_args!("TLS requires both --tls-cert and --tls-key"));
         return 2;
     }
     let scheme = if tls_on { "https" } else { "http" };
     crate::logx::infof(format_args!(
-        "监听 {scheme}://{}（REST + /openapi.json{mcp_note}）",
-        cfg.addr
+        "{}",
+        crate::lang::tf("log.serve_listening", &[scheme, &cfg.addr, &mcp_note])
     ));
 
     let rt = match tokio::runtime::Builder::new_multi_thread()
@@ -479,7 +482,7 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
         tokio::select! {
             join_res = serve_fut => join_res.unwrap_or(1),
             _ = cancel_fut => {
-                crate::logx::infof(format_args!("已优雅关停（ctx 取消）"));
+                crate::logx::infof(format_args!("{}", crate::lang::t("log.graceful")));
                 0
             }
         }

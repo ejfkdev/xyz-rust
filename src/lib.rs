@@ -64,6 +64,7 @@ pub mod config;
 pub mod ctx;
 pub mod dispatch;
 pub mod errors;
+pub mod lang;
 pub mod logx;
 // httpapi 在 http 或 mcp 任一通道存在时都在树中（Go 的结构同款：mcp 复用
 // http 中间件积木；两个通道都裁掉时整体消失）。
@@ -91,6 +92,7 @@ pub use builder::{Builder, Definable, define};
 pub use config::{Capabilities, Config, ModeWords};
 pub use dispatch::{main as main_entry, main_config, run, run_config};
 pub use errors::{Error, Kind};
+pub use lang::{XyzLang, set as set_lang, t, tf};
 pub use registry::Registry;
 pub use spec::{
     CliFieldHint, CliHints, Entry, FieldMeta, HTTPFieldHint, HTTPHints, MCPFieldHint, MCPHints,

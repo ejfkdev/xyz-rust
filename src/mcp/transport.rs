@@ -19,9 +19,7 @@ pub(crate) fn run(ctx: &Ctx, reg: &Registry, args: &[String], base: Options) -> 
         Ok(x) => x,
         Err(e) => {
             eprintln!("mcp: {e}");
-            eprintln!(
-                "用法: mcp stdio|http [--addr :8080] [--versions 2025-06-18,2026-07-28] [--name N] [--server-version V]"
-            );
+            eprintln!("{}", crate::lang::t("mcp.usage"));
             return 2;
         }
     };
@@ -35,9 +33,7 @@ pub(crate) fn run(ctx: &Ctx, reg: &Registry, args: &[String], base: Options) -> 
         }
     }
     if transport == "sse" {
-        eprintln!(
-            "mcp: 本 SDK（官方 Rust SDK rmcp）已随 2026-07-28 修订移除 HTTP+SSE 传输（可用 stdio|http）"
-        );
+        eprintln!("mcp: {}", crate::lang::t("mcp.err_sse_removed"));
         return 2;
     }
     if let Err(e) = validate_versions(&opts.versions) {
@@ -55,9 +51,7 @@ pub(crate) fn run(ctx: &Ctx, reg: &Registry, args: &[String], base: Options) -> 
     match transport.as_str() {
         "stdio" => {
             if !opts.bearer_tokens.is_empty() {
-                crate::logx::warnf(format_args!(
-                    "Bearer 凭据校验只作用于 http 传输，stdio 为本地进程不受保护"
-                ));
+                crate::logx::warnf(format_args!("{}", crate::lang::t("warn.bearer_stdio")));
             }
             serve_stdio(&server)
         }
@@ -139,7 +133,10 @@ fn serve_http(opts: &Options, server: &XyzServer) -> i32 {
     } else {
         opts.addr.clone()
     };
-    crate::logx::infof(format_args!("MCP 监听 {addr}"));
+    crate::logx::infof(format_args!(
+        "{}",
+        crate::lang::tf("log.mcp_listening", &[&addr])
+    ));
     let ctx = Arc::clone(&server.ctx);
     let rt = match tokio::runtime::Runtime::new() {
         Ok(rt) => rt,
@@ -174,7 +171,7 @@ fn serve_http(opts: &Options, server: &XyzServer) -> i32 {
                 ctx.cancelled_async().await;
                 handle.graceful_shutdown(Some(std::time::Duration::from_secs(5)));
             } => {
-                crate::logx::infof(format_args!("已优雅关停（ctx 取消）"));
+                crate::logx::infof(format_args!("{}", crate::lang::t("log.graceful")));
                 0
             }
         }

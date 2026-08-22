@@ -227,12 +227,14 @@ impl App {
         if pos.len() < node.min_pos || pos.len() > node.max_pos {
             return Err(errors::Error::new(
                 errors::Kind::InvalidInput,
-                format!(
-                    "{}: 位置参数数量不符（需要 {} 到 {} 个，收到 {} 个）",
-                    node.path.replace('.', " "),
-                    node.min_pos,
-                    node.max_pos,
-                    pos.len()
+                crate::lang::tf(
+                    "cli.err_positional_count",
+                    &[
+                        &node.path.replace('.', " "),
+                        &node.min_pos.to_string(),
+                        &node.max_pos.to_string(),
+                        &pos.len().to_string(),
+                    ],
                 ),
             ));
         }

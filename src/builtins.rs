@@ -55,6 +55,17 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                 cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), &v);
                 true
             }
+            "--xyz.lang" => {
+                let v = take_value(&args, &mut i, &a)?;
+                if crate::lang::XyzLang::parse(&v).is_none() {
+                    return Err(errors::Error::new(
+                        errors::Kind::Internal,
+                        format!("invalid --xyz.lang {v:?} (want en|zh-CN)"),
+                    ));
+                }
+                cfg.lang = v;
+                true
+            }
             _ => {
                 // = 形式
                 if let Some(v) = a.strip_prefix("--xyz.addr=") {
@@ -82,6 +93,15 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                     true
                 } else if let Some(v) = a.strip_prefix("--xyz.cors=") {
                     cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), v);
+                    true
+                } else if let Some(v) = a.strip_prefix("--xyz.lang=") {
+                    if crate::lang::XyzLang::parse(v).is_none() {
+                        return Err(errors::Error::new(
+                            errors::Kind::Internal,
+                            format!("invalid --xyz.lang {v:?} (want en|zh-CN)"),
+                        ));
+                    }
+                    cfg.lang = v.to_string();
                     true
                 } else {
                     false

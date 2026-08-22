@@ -101,6 +101,22 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
     if cfg.log_level != crate::logx::Level::Unset {
         crate::logx::set_level(cfg.log_level);
     }
+    // 界面语言：--xyz.lang（已写回 cfg）> Config.lang > 环境检测 > 英文。
+    let resolved_lang = if !cfg.lang.is_empty() {
+        match crate::lang::XyzLang::parse(&cfg.lang) {
+            Some(l) => l,
+            None => {
+                eprintln!("xyz: invalid --xyz.lang {:?} (want en|zh-CN)", cfg.lang);
+                return 2;
+            }
+        }
+    } else {
+        crate::lang::XyzLang::detect()
+    };
+    crate::lang::set(
+        resolved_lang,
+        cfg.translations.get(resolved_lang.as_str()).cloned(),
+    );
     if args.is_empty() || args[0] == help_word || args[0] == "--help" || args[0] == "-h" {
         let mut stdout = std::io::stdout();
         let _ = crate::overview::print_overview(
@@ -145,7 +161,8 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
     }
     if cfg.capabilities.no_cli {
         crate::logx::warnf(format_args!(
-            "子命令不可用：CLI 已禁用（Config.Capabilities.NoCLI；{mcp_word}/{serve}/help/-v 仍可用）"
+            "{}",
+            crate::lang::tf("warn.no_cli", &[&mcp_word, &serve])
         ));
         return 1;
     }
@@ -242,7 +259,7 @@ fn run_cli(ctx: &Ctx, reg: &Registry, args: &[String]) -> i32 {
 
 #[cfg(not(feature = "cli"))]
 fn run_cli(_ctx: &Ctx, _reg: &Registry, _args: &[String]) -> i32 {
-    eprintln!("xyz: 本二进制未编译 CLI 前端（构建时使用了 --no-default-features）");
+    eprintln!("xyz: {}", crate::lang::tf("stub.not_compiled", &["CLI"]));
     1
 }
 
@@ -253,7 +270,7 @@ fn run_serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
 
 #[cfg(not(feature = "http"))]
 fn run_serve(_ctx: &Ctx, _reg: &Registry, _args: &[String], _cfg: Config) -> i32 {
-    eprintln!("xyz: 本二进制未编译 HTTP 前端（构建时禁用了 http feature）");
+    eprintln!("xyz: {}", crate::lang::tf("stub.not_compiled", &["HTTP"]));
     1
 }
 
@@ -264,6 +281,6 @@ fn run_mcp(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
 
 #[cfg(not(feature = "mcp"))]
 fn run_mcp(_ctx: &Ctx, _reg: &Registry, _args: &[String], _cfg: Config) -> i32 {
-    eprintln!("xyz: 本二进制未编译 MCP 前端（构建时禁用了 mcp feature）");
+    eprintln!("xyz: {}", crate::lang::tf("stub.not_compiled", &["MCP"]));
     1
 }

@@ -24,7 +24,7 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
         writeln!(w, "{desc}")?;
         writeln!(w)?;
     }
-    writeln!(w, "Usage:")?;
+    writeln!(w, "{}", crate::lang::t("help.usage"))?;
     write!(w, "  {bin}")?;
     if node.leaf {
         // 自定义 usage 是相对父路径的收尾段（"add <name>"），拼上祖先即可。
@@ -51,18 +51,18 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
         if !node.path.is_empty() {
             write!(w, " {}", node.path.replace('.', " "))?;
         }
-        write!(w, " [命令]")?;
+        write!(w, " {}", crate::lang::t("help.commands_placeholder"))?;
     }
     writeln!(w)?;
 
     if !node.aliases.is_empty() {
         writeln!(w)?;
-        writeln!(w, "Aliases:")?;
+        writeln!(w, "{}", crate::lang::t("help.aliases"))?;
         writeln!(w, "  {}", node.aliases.join(", "))?;
     }
     if !node.leaf {
         writeln!(w)?;
-        writeln!(w, "命令:")?;
+        writeln!(w, "{}", crate::lang::t("help.commands"))?;
         let visible: Vec<&CmdNode> = node.children.iter().filter(|c| !c.hidden).collect();
         let width = visible.iter().map(|c| c.segment.len()).max().unwrap_or(0);
         for child in visible {
@@ -70,7 +70,7 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
         }
     } else if !node.defs.is_empty() {
         writeln!(w)?;
-        writeln!(w, "Flags:")?;
+        writeln!(w, "{}", crate::lang::t("help.flags"))?;
         let mut rows: Vec<(String, String)> = Vec::with_capacity(node.defs.len());
         for d in &node.defs {
             let mut name = format!("--{}", d.long);
@@ -87,16 +87,16 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
         print_rows(w, &rows)?;
     }
     writeln!(w)?;
-    writeln!(w, "Global Flags:")?;
+    writeln!(w, "{}", crate::lang::t("help.global_flags"))?;
     print_rows(
         w,
         &[
+            ("--json".to_string(), crate::lang::t("help.json_flag")),
             (
-                "--json".to_string(),
-                "输出 JSON 而不是人类可读格式".to_string(),
+                "-v, --version".to_string(),
+                crate::lang::t("help.version_flag"),
             ),
-            ("-v, --version".to_string(), "输出版本信息".to_string()),
-            ("-h, --help".to_string(), "打印帮助".to_string()),
+            ("-h, --help".to_string(), crate::lang::t("help.help_flag")),
         ],
     )?;
     if node.leaf

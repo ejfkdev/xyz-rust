@@ -28,44 +28,33 @@ pub fn print_overview(
     // before 块直接写目标流；正文攒进 buf。
     write_block(w, help_before)?;
     let mut buf = String::new();
-    let _ = writeln!(buf, "用法（模式由程序自动判断，定义只有一份）:");
-    let mut cli_line =
-        "  <app> [命令] [参数]           CLI 模式（子命令 + flag/位置参数；-h 帮助，-v 版本）"
-            .to_string();
+    let _ = writeln!(buf, "{}", crate::lang::t("overview.usage_line"));
+    let mut cli_line = crate::lang::t("overview.cli_mode");
     if caps.no_cli {
-        cli_line += "（已禁用）";
+        cli_line += &crate::lang::t("overview.disabled");
     } else if !crate::dispatch::cli_frontend_compiled() {
-        cli_line += "（本二进制未编译）";
+        cli_line += &crate::lang::t("overview.not_compiled");
     }
     let _ = writeln!(buf, "{cli_line}");
-    let serve_line = format!(
-        "  <app> {} [--addr :8080]      HTTP 模式（REST 路由 + /openapi.json + 可挂 /mcp）",
-        serve
-    );
+    let serve_line = crate::lang::tf("overview.serve_mode", &[serve]);
     let serve_line = if caps.no_http {
-        serve_line + "（已禁用）"
+        serve_line + &crate::lang::t("overview.disabled")
     } else if !crate::dispatch::http_frontend_compiled() {
-        serve_line + "（本二进制未编译）"
+        serve_line + &crate::lang::t("overview.not_compiled")
     } else {
         serve_line
     };
     let _ = writeln!(buf, "{serve_line}");
-    let mcp_line = format!(
-        "  <app> {} stdio|http          MCP 模式（官方 SDK；--versions 限定协议版本）",
-        mcp_word
-    );
+    let mcp_line = crate::lang::tf("overview.mcp_mode", &[mcp_word]);
     let mcp_line = if caps.no_mcp {
-        mcp_line + "（已禁用）"
+        mcp_line + &crate::lang::t("overview.disabled")
     } else if !crate::dispatch::mcp_frontend_compiled() {
-        mcp_line + "（本二进制未编译）"
+        mcp_line + &crate::lang::t("overview.not_compiled")
     } else {
         mcp_line
     };
     let _ = writeln!(buf, "{mcp_line}");
-    let _ = writeln!(
-        buf,
-        "内置参数（代码中的 xyz_rust::Config 或命令行）：--xyz.addr=:8080（默认监听地址） --xyz.bearer=tok1,tok2（serve 与 MCP http 的 Bearer 凭据）"
-    );
+    let _ = writeln!(buf, "{}", crate::lang::t("overview.builtins"));
     // CLI 被禁用时不生成子命令，总览也不再列出命令表。
     let names = reg.names();
     if names.is_empty() || caps.no_cli {
@@ -74,7 +63,7 @@ pub fn print_overview(
         return write_block(w, help_after);
     }
     let _ = writeln!(buf);
-    let _ = writeln!(buf, "命令:");
+    let _ = writeln!(buf, "{}", crate::lang::t("overview.commands"));
     let width = names.iter().map(|n| n.len()).max().unwrap_or(0);
     for n in &names {
         let summary = reg.get(n).map(|e| e.summary.clone()).unwrap_or_default();

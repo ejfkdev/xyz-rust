@@ -56,6 +56,13 @@ pub struct Config {
     /// OPTIONS 预检在鉴权之前应答。命令行：--xyz.cors=origin1,origin2。
     pub cors_origins: Vec<String>,
 
+    /// 界面语言覆盖：""=自动（--xyz.lang flag > 本字段 > LANG/LC_ALL 环境
+    /// 检测 > 英文默认）。取值 "en" | "zh-CN"。
+    pub lang: String,
+    /// 用户的多语言内容覆盖表：语言 → (消息键 → 文本)。键名见 lang 目录
+    /// （xyz-spec §15.8 的规范键表）。
+    pub translations: std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+
     /// help 总览的自定义文本块：前者原样插在总览开头（程序名/描述/版本/
     /// 仓库地址等自己拼），后者插在结尾（命令表之后，即使命令表被隐藏也
     /// 打印）。空 = 不插入。

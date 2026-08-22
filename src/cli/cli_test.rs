@@ -469,7 +469,7 @@ fn positional_min_max() {
     assert_eq!(out, "one:two\n");
     let (code, _, err) = run_app(&reg, &["p", "x"]);
     assert_eq!(code, 2);
-    assert!(err.contains("位置参数数量不符"), "{err}");
+    assert!(err.contains("positional argument count mismatch"), "{err}");
 }
 
 #[derive(Serialize, XyzArgs)]
