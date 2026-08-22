@@ -310,7 +310,7 @@ fn main() {
                         "k".to_string(),
                         xyz_rust::MCPFieldHint { default: Some(15.into()) },
                     )]),
-                    annotations: Vec::new(),
+                    ..Default::default()
                 }),
 
             &xyz_rust::define("math.sum", sum)

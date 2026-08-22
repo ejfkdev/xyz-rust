@@ -255,7 +255,7 @@ async fn handle_request(
         }
     }
 
-    match (entry.invoke)(&ctx, &m) {
+    match (entry.invoke)(ctx, &m) {
         Ok(out) => {
             let s = serde_json::to_string_pretty(&out).unwrap_or_else(|_| "null".to_string());
             json_response(StatusCode::OK, &s)
