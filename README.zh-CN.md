@@ -147,6 +147,29 @@ xyz-example serve --addr :8080    HTTP：REST 路由 + /openapi.json + 同端口
 xyz-example mcp stdio|http        MCP：官方 Rust SDK，两种传输（--versions 限定协议版本）
 xyz-example completion bash|zsh|fish   内置 shell 补全脚本
 ```
+## 命令通道、长驻命令与可组合派发
+
+- **单命令通道开关**：`CliHints { skip }`、`HTTPHints { skip }`、
+  `MCPHints { skip }` 只把该命令从被标记的通道移除（不建子命令节点 /
+  不路由 / 不成为工具）；CLI 的 `skip` 同时移除别名与 completion 词。
+- **长驻命令**：`CliHints { daemon: true }` 声明长驻生命周期——handler
+  阻塞到上下文取消，CLI 优雅退出 0，返回值不渲染，命令隐含 CLI-only。
+
+  ```rust
+  define("watch", watch).cli(CliHints { daemon: true, ..Default::default() });
+  fn watch(ctx: &Ctx, _: &Args) -> errs::Result<()> { while !ctx.cancelled() { sleep(Duration::from_millis(50)); } Ok(()) }
+  ```
+
+- **通道默认参数**：`--default k=v`（可重复；逗号分隔对）——serve/mcp 启动
+  时注入，只补缺席的请求/工具键；优先级：显式 > env > 接口默认 > **通道
+  默认** > 全局默认 > 零值。serve/mcp 里任何未识别的 `--key value` 都是它
+  的简写：`gs serve --index ./wiki` 等价 `--default index=./wiki`。代码侧：
+  `Config.channel_defaults`。
+
+- **可组合派发**：`let (code, handled) = xyz_rust::try_run(&reg, args)`——
+  完整派发管线，但 CLI 顶层词未命中时静默返回 `(0, false)`，宿主接着路由
+  自己的命令；`try_run_config` 可带自定义 `Config`。
+
 **自定义帮助块。** 纯文本自由块，多行原样输出（末尾多余换行归一为一个）；空块零影响：
 
 ```rust

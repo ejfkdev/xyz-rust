@@ -147,6 +147,34 @@ xyz-example mcp stdio|http      MCP: official Rust SDK, two transports (--versio
 xyz-example completion bash|zsh|fish   Built-in shell completion scripts
 ```
 
+## Command channels, daemons & composable dispatch
+
+- **Per-command channel switches**: `CliHints { skip }`, `HTTPHints { skip }`,
+  `MCPHints { skip }` remove the command from the marked channel only
+  (no subcommand node / no route / no tool); CLI `skip` also drops aliases
+  and completion words.
+- **Daemon commands**: `CliHints { daemon: true }` declares a long-running
+  lifecycle — the handler blocks until the context is cancelled, the CLI
+  exits 0 gracefully, the return value is not rendered and the command is
+  implicitly CLI-only.
+
+  ```rust
+  define("watch", watch).cli(CliHints { daemon: true, ..Default::default() });
+  fn watch(ctx: &Ctx, _: &Args) -> errs::Result<()> { while !ctx.cancelled() { sleep(Duration::from_millis(50)); } Ok(()) }
+  ```
+
+- **Channel defaults**: `--default k=v` (repeatable; comma-pairs) —
+  injected at serve/mcp startup, fills absent request/tool keys only;
+  precedence: explicit > env > interface default > **channel default** >
+  global default > zero. Any unrecognised `--key value` in serve/mcp is a
+  shorthand for it: `gs serve --index ./wiki` equals
+  `--default index=./wiki`. Code side: `Config.channel_defaults`.
+
+- **Composable dispatch**: `let (code, handled) = xyz_rust::try_run(&reg, args)` —
+  full dispatch pipeline, but an unknown CLI top word returns `(0, false)`
+  silently so the host can route its own commands; `try_run_config` takes a
+  custom `Config`.
+
 **Custom help blocks.** Free text blocks, raw multi-line, printed verbatim
 (trailing newlines normalized to one); empty = no-op:
 
