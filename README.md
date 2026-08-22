@@ -162,6 +162,30 @@ define("extract", extract)
     .cli(CliHints { before: "extract — 解包镜像".into(), after: "仓库: https://…".into(), ..Default::default() })
 ```
 
+## Interface language
+
+The interface language of all built-in text (overview, help labels, usage
+errors, diagnostics) is picked in this order: `--xyz.lang=en|zh-CN` flag >
+`Config.lang` > `LANG`/`LC_ALL` environment (a lowercase `zh` prefix picks
+Chinese) > **English (default)**. Both languages ship in the library.
+Configure more multilingual content with `Config.translations`
+(language → (message key → text)); key names and English wording are the
+xyz-spec §15.5 canonical catalog:
+
+```rust
+.run_config(Config {
+    lang: "zh-CN".into(), // or: LANG=zh_CN ./app; or: --xyz.lang=zh-CN
+    translations: HashMap::from([(
+        "en".to_string(),
+        HashMap::from([("help.help_flag".to_string(), "show this help".to_string())]),
+    )]),
+    ..Default::default()
+})
+```
+
+Error taxonomy messages stay English; user content (summaries,
+descriptions, help blocks) is never translated.
+
 **Default subcommand** (CLI only): a command marked `default: true` in its
 `CliHints` becomes the default child of its parent node — when the first
 argument matches no registered segment (and is not a flag), the whole

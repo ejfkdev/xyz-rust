@@ -1,6 +1,6 @@
 # Conformance — xyz-rust
 
-Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.1.2**.
+Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.2.0**.
 
 Status: **conformant (baseline anchor)** — xyz-rust is one of the two
 reference implementations the specification was written from.
@@ -35,7 +35,9 @@ k=25), the SHA-256 `file hash` answer, the rejection of `mcp sse`
 (codified by spec §12.3 — see D-rust-06), and the default-subcommand
 forwarding of §10.1 (`cli::cli_test::default_subcommand_forwards_all_args`),
 plus the custom help blocks of §10.4/§13.2
-(`dispatch_test::overview_help_blocks`, `cli::cli_test::help_blocks_on_leaf_only`).
+(`dispatch_test::overview_help_blocks`, `cli::cli_test::help_blocks_on_leaf_only`)
+and the language catalog of §15.5 (`lang::tests`,
+`dispatch_test::lang_resolution_and_catalog`).
 
 ## Deviations
 

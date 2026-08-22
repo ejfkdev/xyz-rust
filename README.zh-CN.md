@@ -161,6 +161,27 @@ define("extract", extract)
     .cli(CliHints { before: "extract — 解包镜像".into(), after: "仓库: https://…".into(), ..Default::default() })
 ```
 
+## 界面语言
+
+所有内置界面文本（总览、帮助标签、用法错误、诊断）的语言按此顺序选择：
+`--xyz.lang=en|zh-CN` flag > `Config.lang` > `LANG`/`LC_ALL` 环境检测
+（小写 `zh` 前缀即中文）> **英文（默认）**。两种语言随库携带。更多多语言
+内容用 `Config.translations` 配置（语言 →（消息键 → 文本））；键名与英文
+措辞即 xyz-spec §15.5 的规范目录：
+
+```rust
+.run_config(Config {
+    lang: "zh-CN".into(), // 或 LANG=zh_CN ./app；或 --xyz.lang=zh-CN
+    translations: HashMap::from([(
+        "en".to_string(),
+        HashMap::from([("help.help_flag".to_string(), "show this help".to_string())]),
+    )]),
+    ..Default::default()
+})
+```
+
+错误分类消息保持英文；用户内容（summary、description、帮助块）永不翻译。
+
 **默认子命令**（仅 CLI）：在 `CliHints` 中标记 `default: true` 的命令成为
 其父节点的默认子命令——首段参数匹配不到任何已注册命令段（且不是 flag）时，
 整串参数原样转发给它：
