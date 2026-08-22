@@ -34,6 +34,11 @@ pub struct CliHints {
     /// flag）时，整串参数不消费地转发给它（udf image.tar ⇔
     /// udf extract image.tar，当 extract 标记了 default）。
     pub default: bool,
+    /// `-h` 帮助的自定义文本块：分别插在帮助最前（description 之前）与
+    /// 最后（Global Flags 之后）。原样输出（多行、缩进自控；结尾换行归一）。
+    /// 空 = 不插入。仅叶子命令生效（中间节点没有 CliHints）。
+    pub before: String,
+    pub after: String,
     pub fields: HashMap<String, CliFieldHint>,
 }
 

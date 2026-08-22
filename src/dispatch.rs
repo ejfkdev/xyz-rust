@@ -103,8 +103,15 @@ pub fn run_config(reg: &Registry, args: Vec<String>, cfg: Config) -> i32 {
     }
     if args.is_empty() || args[0] == help_word || args[0] == "--help" || args[0] == "-h" {
         let mut stdout = std::io::stdout();
-        let _ =
-            crate::overview::print_overview(&mut stdout, reg, &serve, &mcp_word, cfg.capabilities);
+        let _ = crate::overview::print_overview(
+            &mut stdout,
+            reg,
+            &serve,
+            &mcp_word,
+            cfg.capabilities,
+            &cfg.help_before,
+            &cfg.help_after,
+        );
         return 0;
     }
     // 优雅关停：信号取消的 ctx 贯穿 CLI/HTTP/MCP，长任务可在退出前排空。

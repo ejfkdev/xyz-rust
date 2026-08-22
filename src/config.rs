@@ -55,6 +55,12 @@ pub struct Config {
     /// CORSOrigins 非空则开启 CORS：逐个 Origin 放行（"*" 表示任意来源），
     /// OPTIONS 预检在鉴权之前应答。命令行：--xyz.cors=origin1,origin2。
     pub cors_origins: Vec<String>,
+
+    /// help 总览的自定义文本块：前者原样插在总览开头（程序名/描述/版本/
+    /// 仓库地址等自己拼），后者插在结尾（命令表之后，即使命令表被隐藏也
+    /// 打印）。空 = 不插入。
+    pub help_before: String,
+    pub help_after: String,
 }
 
 impl Config {

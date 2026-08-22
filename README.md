@@ -147,6 +147,21 @@ xyz-example mcp stdio|http      MCP: official Rust SDK, two transports (--versio
 xyz-example completion bash|zsh|fish   Built-in shell completion scripts
 ```
 
+**Custom help blocks.** Free text blocks, raw multi-line, printed verbatim
+(trailing newlines normalized to one); empty = no-op:
+
+```rust
+// Overview top/bottom (Config) — app name, description, version, repo…
+.run_config(Config {
+    help_before: "udf v1.0.0 — inspect disk images\nhttps://github.com/example/udf".into(),
+    help_after: "More examples: https://github.com/example/udf#examples".into(),
+    ..Default::default()
+});
+// Per-command -h (CliHints):
+define("extract", extract)
+    .cli(CliHints { before: "extract — 解包镜像".into(), after: "仓库: https://…".into(), ..Default::default() })
+```
+
 **Default subcommand** (CLI only): a command marked `default: true` in its
 `CliHints` becomes the default child of its parent node — when the first
 argument matches no registered segment (and is not a flag), the whole

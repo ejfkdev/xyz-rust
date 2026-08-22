@@ -7,13 +7,26 @@ use std::io::Write;
 use crate::config::Capabilities;
 use crate::registry::Registry;
 
+/// 原样输出自定义帮助块：末尾多余换行归一为单个换行，与后续内容自然
+/// 分行；空块不输出。
+pub fn write_block(w: &mut dyn Write, s: &str) -> std::io::Result<()> {
+    if s.is_empty() {
+        return Ok(());
+    }
+    writeln!(w, "{}", s.trim_end_matches('\n'))
+}
+
 pub fn print_overview(
     w: &mut dyn Write,
     reg: &Registry,
     serve: &str,
     mcp_word: &str,
     caps: Capabilities,
+    help_before: &str,
+    help_after: &str,
 ) -> std::io::Result<()> {
+    // before 块直接写目标流；正文攒进 buf。
+    write_block(w, help_before)?;
     let mut buf = String::new();
     let _ = writeln!(buf, "用法（模式由程序自动判断，定义只有一份）:");
     let mut cli_line =
@@ -57,7 +70,8 @@ pub fn print_overview(
     let names = reg.names();
     if names.is_empty() || caps.no_cli {
         write!(w, "{buf}")?;
-        return Ok(());
+        // 自定义 after 块在早退路径照打。
+        return write_block(w, help_after);
     }
     let _ = writeln!(buf);
     let _ = writeln!(buf, "命令:");
@@ -66,5 +80,6 @@ pub fn print_overview(
         let summary = reg.get(n).map(|e| e.summary.clone()).unwrap_or_default();
         let _ = writeln!(buf, "  {n:<width$}  {summary}");
     }
-    write!(w, "{buf}")
+    write!(w, "{buf}")?;
+    write_block(w, help_after)
 }

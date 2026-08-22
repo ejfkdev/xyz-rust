@@ -232,6 +232,79 @@ fn strip_xyz_flags() {
 }
 
 #[test]
+fn overview_help_blocks() {
+    // 通过 print_overview 直接断言块插入与归一化
+    let reg = test_reg(&["a.b"]);
+    let mut buf = Vec::new();
+    let before = "myapp v1.2.3 — do the thing\nhttps://github.com/me/myapp";
+    let after = "Need help? https://github.com/me/myapp#faq";
+    crate::overview::print_overview(
+        &mut buf,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        before,
+        after,
+    )
+    .unwrap();
+    let out = String::from_utf8(buf).unwrap();
+    assert!(out.starts_with(&format!("{before}\n")), "{out}");
+    assert!(out.ends_with(&format!("{after}\n")), "{out}");
+    // 空块零变化
+    let mut a = Vec::new();
+    let mut b = Vec::new();
+    crate::overview::print_overview(
+        &mut a,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "",
+        "",
+    )
+    .unwrap();
+    crate::overview::print_overview(
+        &mut b,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "",
+        "",
+    )
+    .unwrap();
+    assert_eq!(a, b);
+    // 空注册表早退路径 after 照打
+    let mut c = Vec::new();
+    crate::overview::print_overview(
+        &mut c,
+        &Registry::new(),
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "",
+        "tail",
+    )
+    .unwrap();
+    assert!(String::from_utf8(c).unwrap().ends_with("tail\n"));
+    // 多行保留、结尾换行归一
+    let mut d = Vec::new();
+    crate::overview::print_overview(
+        &mut d,
+        &reg,
+        "serve",
+        "mcp",
+        Capabilities::default(),
+        "a\nb\n\n\n",
+        "",
+    )
+    .unwrap();
+    let ds = String::from_utf8(d).unwrap();
+    assert!(ds.starts_with("a\nb\n用法"), "{ds:?}");
+}
+
+#[test]
 fn parse_serve_args_bare_flags() {
     let cfg = crate::builtins::parse_serve_args(
         &args(&[

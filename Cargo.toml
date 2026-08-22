@@ -1,6 +1,6 @@
 [package]
 name = "xyz-rust"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 description = "One definition, three interfaces（CLI / HTTP / MCP）— a command toolkit for Rust"
 license = "MIT"
@@ -13,7 +13,7 @@ readme = "README.md"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 chrono = { version = "0.4", features = ["serde"] }
-xyz-rust-macros = { path = "xyz-rust-macros", version = "0.1.1" }
+xyz-rust-macros = { path = "xyz-rust-macros", version = "0.1.2" }
 
 # Channel-trimming features（对齐 Go 的 nocli/nomcp/nohttp build tags）：
 #   feature cli  -> CLI 前端（自带最小信号依赖；核心仍零三方）

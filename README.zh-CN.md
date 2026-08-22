@@ -147,6 +147,20 @@ xyz-example serve --addr :8080    HTTP：REST 路由 + /openapi.json + 同端口
 xyz-example mcp stdio|http        MCP：官方 Rust SDK，两种传输（--versions 限定协议版本）
 xyz-example completion bash|zsh|fish   内置 shell 补全脚本
 ```
+**自定义帮助块。** 纯文本自由块，多行原样输出（末尾多余换行归一为一个）；空块零影响：
+
+```rust
+// 总览开头/结尾（Config）——程序名、描述、版本、仓库地址等自己拼
+.run_config(Config {
+    help_before: "udf v1.0.0 — 磁盘镜像查看工具\nhttps://github.com/example/udf".into(),
+    help_after: "更多示例: https://github.com/example/udf#examples".into(),
+    ..Default::default()
+});
+// 每条命令的 -h（CliHints）：
+define("extract", extract)
+    .cli(CliHints { before: "extract — 解包镜像".into(), after: "仓库: https://…".into(), ..Default::default() })
+```
+
 **默认子命令**（仅 CLI）：在 `CliHints` 中标记 `default: true` 的命令成为
 其父节点的默认子命令——首段参数匹配不到任何已注册命令段（且不是 flag）时，
 整串参数原样转发给它：

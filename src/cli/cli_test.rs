@@ -352,6 +352,49 @@ fn default_subcommand_forwards_all_args() {
 }
 
 #[test]
+fn help_blocks_on_leaf_only() {
+    let reg = Registry::new();
+
+    #[derive(XyzArgs)]
+    struct E {
+        #[xyz(desc = "x")]
+        x: String,
+    }
+    fn eh(_: &Ctx, _: &E) -> errors::Result<String> {
+        Ok(String::new())
+    }
+    Command::new("extract", eh)
+        .cli(crate::CliHints {
+            before: "extract — 解包镜像\n用法示例见下方".into(),
+            after: "更多: https://example.com/udf#extract".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let (code, out, _) = run_app(&reg, &["extract", "-h"]);
+    assert_eq!(code, 0);
+    assert!(out.starts_with("extract — 解包镜像\n"), "{out}");
+    assert!(
+        out.ends_with("更多: https://example.com/udf#extract\n"),
+        "{out}"
+    );
+    // 中间节点帮助不出现叶子块
+    let reg2 = Registry::new();
+    Command::new("user.add", eh)
+        .cli(crate::CliHints {
+            before: "LEAFBLK".into(),
+            ..Default::default()
+        })
+        .register(&reg2)
+        .unwrap();
+    let (_, out2, _) = run_app(&reg2, &["user", "-h"]);
+    assert!(!out2.contains("LEAFBLK"), "{out2}");
+    let (code3, out3, _) = run_app(&reg2, &["user", "add", "-h"]);
+    assert_eq!(code3, 0);
+    assert!(out3.starts_with("LEAFBLK\n"), "{out3}");
+}
+
+#[test]
 fn duplicate_default_rejected_at_build() {
     let reg = Registry::new();
 

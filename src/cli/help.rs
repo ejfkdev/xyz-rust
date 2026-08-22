@@ -9,6 +9,12 @@ use crate::errors;
 use crate::spec::field::FieldMeta;
 
 pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Result<()> {
+    // 自定义块：只在叶子命令上生效（中间节点没有 CliHints）。
+    if node.leaf
+        && let Some(entry) = &node.entry
+    {
+        write_help_block(w, &entry.cli.before)?;
+    }
     let desc = if node.long.is_empty() {
         node.short.as_str()
     } else {
@@ -93,7 +99,20 @@ pub fn print_help(w: &mut dyn Write, node: &CmdNode, bin: &str) -> errors::Resul
             ("-h, --help".to_string(), "打印帮助".to_string()),
         ],
     )?;
+    if node.leaf
+        && let Some(entry) = &node.entry
+    {
+        write_help_block(w, &entry.cli.after)?;
+    }
     Ok(())
+}
+
+/// 原样输出 -h 的自定义文本块：末尾换行归一；空块不输出。
+pub fn write_help_block(w: &mut dyn Write, s: &str) -> errors::Result<()> {
+    if s.is_empty() {
+        return Ok(());
+    }
+    writeln!(w, "{}", s.trim_end_matches('\n')).map_err(errors::Error::from)
 }
 
 fn print_rows(w: &mut dyn Write, rows: &[(String, String)]) -> errors::Result<()> {
