@@ -435,3 +435,5 @@ git tag v0.1.0 && git push origin v0.1.0   # consumers: cargo add xyz-rust (firs
 ```
 
 > Also available: [中文文档](README.zh-CN.md)
+
+Release process: see [RELEASING.md](RELEASING.md) — every tag carries a full changelog (the annotated message *is* the release note).
