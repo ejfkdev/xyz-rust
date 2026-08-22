@@ -75,8 +75,8 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
     let mut tools = Vec::new();
     let mut by_name = BTreeMap::new();
     for e in reg.all() {
-        if e.mcp.skip {
-            continue; // 通道层面整体移除：不成为工具
+        if e.mcp.skip || e.cli.daemon {
+            continue; // 通道层面整体移除；daemon 只属于 CLI
         }
         let input_schema = Arc::new(
             crate::spec::schema::schema_to_value(&e.input_schema)

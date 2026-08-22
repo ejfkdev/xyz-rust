@@ -206,6 +206,17 @@ pub fn parse_serve_args(args: &[String], mut cfg: Config) -> Config {
                     cfg.cors_origins = merge_tokens(cfg.cors_origins.clone(), v);
                 } else if let Some(v) = other.strip_prefix("--default=") {
                     let _ = merge_default_pairs(&mut cfg.channel_defaults, v);
+                } else if let Some(kv) = other.strip_prefix("--") {
+                    // 未识别的 --key=v 透传为通道默认参数
+                    if let Some((k, v)) = kv.split_once('=') {
+                        let _ = merge_default_pairs(&mut cfg.channel_defaults, &format!("{k}={v}"));
+                    } else if let Some(next) = args.get(i + 1)
+                        && !next.starts_with('-')
+                    {
+                        let _ =
+                            merge_default_pairs(&mut cfg.channel_defaults, &format!("{kv}={next}"));
+                        i += 1;
+                    }
                 }
             }
         }

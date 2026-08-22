@@ -54,8 +54,8 @@ pub(crate) fn router_with(
     let mut r: Router = Router::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
     for e in reg.all() {
-        if e.http.skip {
-            continue; // 通道层面整体移除
+        if e.http.skip || e.cli.daemon {
+            continue; // 通道层面整体移除；daemon 只属于 CLI
         }
         if e.http.method.is_empty() || e.http.path.is_empty() {
             continue; // 该命令没有声明 HTTP 路由（CLI/MCP 专用）

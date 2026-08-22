@@ -302,6 +302,10 @@ impl App {
         // 中间件洋葱链：自内向外构建（最晚注册的最外层）。
         let terminal = |ctx: &Ctx, ec: &ExecContext, args: &mut Map<String, Value>| {
             let out = (ec.entry.invoke)(ctx, args)?;
+            // 长驻命令：ctx 取消即优雅关停，不渲染返回值。
+            if ec.entry.cli.daemon {
+                return Ok(());
+            }
             let mut w = ec.out.lock().unwrap();
             if ec.json {
                 let s = serde_json::to_string_pretty(&out).map_err(|e| {

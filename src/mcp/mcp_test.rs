@@ -165,8 +165,12 @@ fn parse_args_forms() {
     assert!(err.to_string().contains("missing transport"), "{err}");
     let err = crate::mcp::args::parse_args(&s2(&["x", "y"])).unwrap_err();
     assert!(err.to_string().contains("unexpected argument"), "{err}");
-    let err = crate::mcp::args::parse_args(&s2(&["--ghost", "stdio"])).unwrap_err();
-    assert!(err.to_string().contains("unknown flag"), "{err}");
+    // 未识别 --key v 现在透传为通道默认参数（与 serve 一致）
+    let (_, o) = crate::mcp::args::parse_args(&s2(&["http", "--index", "./wiki"])).unwrap();
+    assert_eq!(o.defaults["index"], "./wiki");
+    // 缺值的悬空 flag 报错
+    let err = crate::mcp::args::parse_args(&s2(&["--dangling"])).unwrap_err();
+    assert!(err.to_string().contains("needs an argument"), "{err}");
 }
 
 #[test]

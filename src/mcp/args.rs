@@ -103,10 +103,24 @@ pub fn parse_args(args: &[String]) -> errors::Result<(String, Options)> {
                 opts.version = v.clone();
             }
             _ if a.starts_with('-') => {
-                return Err(errors::Error::new(
-                    errors::Kind::Internal,
-                    format!("unknown flag {a:?}"),
-                ));
+                // 未识别的 --key v / --key=v 透传为通道默认参数（与 serve 一致）
+                let raw = a.trim_start_matches('-');
+                if let Some((k, v)) = raw.split_once('=') {
+                    crate::builtins::merge_default_pairs(&mut opts.defaults, &format!("{k}={v}"))?;
+                } else if let Some(next) = args.get(i + 1)
+                    && !next.starts_with('-')
+                {
+                    crate::builtins::merge_default_pairs(
+                        &mut opts.defaults,
+                        &format!("{raw}={next}"),
+                    )?;
+                    i += 1;
+                } else {
+                    return Err(errors::Error::new(
+                        errors::Kind::Internal,
+                        format!("flag needs an argument: --{raw}"),
+                    ));
+                }
             }
             _ => {
                 if positional == 0 {

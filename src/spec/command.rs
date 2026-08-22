@@ -37,6 +37,10 @@ pub struct CliHints {
     /// 从 CLI 通道整体移除该命令：不建子命令、别名不生效、不出现在
     /// completion。与 hidden 的区别：hidden 只藏帮助、仍可执行。
     pub skip: bool,
+    /// 声明「长驻命令」：handler 阻塞到 ctx 取消再返回。语义：隐含
+    /// HTTP/MCP 双排除（通道层面不消费）；执行时不渲染返回值（handler
+    /// 的 error 照常分类）；ctx 取消即优雅关停、退出 0。
+    pub daemon: bool,
     /// `-h` 帮助的自定义文本块：分别插在帮助最前（description 之前）与
     /// 最后（Global Flags 之后）。原样输出（多行、缩进自控；结尾换行归一）。
     /// 空 = 不插入。仅叶子命令生效（中间节点没有 CliHints）。
