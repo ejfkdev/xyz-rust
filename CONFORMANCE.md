@@ -1,6 +1,6 @@
 # Conformance — xyz-rust
 
-Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.2.0**.
+Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.3.0**.
 
 Status: **conformant (baseline anchor)** — xyz-rust is one of the two
 reference implementations the specification was written from.
@@ -37,7 +37,10 @@ forwarding of §10.1 (`cli::cli_test::default_subcommand_forwards_all_args`),
 plus the custom help blocks of §10.4/§13.2
 (`dispatch_test::overview_help_blocks`, `cli::cli_test::help_blocks_on_leaf_only`)
 and the language catalog of §15.5 (`lang::tests`,
-`dispatch_test::lang_resolution_and_catalog`).
+`dispatch_test::lang_resolution_and_catalog`), plus §4.5a/§13.9/§6.1/
+§10.4 (`cli::cli_test::channel_skip_and_help_types`,
+`cli::cli_test::daemon_style_command`, `dispatch_test::try_run_composability`,
+`dispatch_test::channel_defaults_flag`).
 
 ## Deviations
 
