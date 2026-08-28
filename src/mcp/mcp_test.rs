@@ -198,3 +198,45 @@ fn options_merge_defaults() {
 fn s2(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
+
+#[test]
+fn block_envelope_passes_through() {
+    use rmcp::model::CallToolResponse;
+    let env = serde_json::json!({"content":[
+        {"type":"text","text":"hello"},
+        {"type":"image","mimeType":"image/png","data":"aGVsbG8="}
+    ]});
+    let resp = handler::success_response(env.clone());
+    let CallToolResponse::Complete(res) = resp else {
+        panic!("want complete response");
+    };
+    assert!(res.is_error.is_none());
+    // Content 块保真；structuredContent 仍持信封。
+    match &res.content[0] {
+        rmcp::model::ContentBlock::Text(t) => assert_eq!(t.text, "hello"),
+        other => panic!("want text block, got {other:?}"),
+    }
+    match &res.content[1] {
+        rmcp::model::ContentBlock::Image(img) => {
+            assert_eq!(img.data, "aGVsbG8=");
+            assert_eq!(img.mime_type, "image/png");
+        }
+        other => panic!("want image block, got {other:?}"),
+    }
+    assert_eq!(res.structured_content, Some(env));
+
+    // 普通 JSON 不误报：走 §12.5 文本+structured 双内容。
+    let resp = handler::success_response(serde_json::json!({"msg": "hi"}));
+    let CallToolResponse::Complete(plain) = resp else {
+        panic!("want complete response");
+    };
+    assert_eq!(plain.content.len(), 1);
+    assert!(matches!(
+        plain.content[0],
+        rmcp::model::ContentBlock::Text(_)
+    ));
+    assert_eq!(
+        plain.structured_content,
+        Some(serde_json::json!({"msg": "hi"}))
+    );
+}

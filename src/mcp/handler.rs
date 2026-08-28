@@ -198,13 +198,7 @@ impl ServerHandler for XyzServer {
             }
         }
         match (entry.invoke)(&self.ctx, &arguments) {
-            Ok(out) => {
-                let text = render_text(&out);
-                let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
-                result.is_error = None;
-                result.structured_content = Some(out);
-                Ok(CallToolResponse::Complete(result))
-            }
+            Ok(out) => Ok(success_response(out)),
             Err(e) => {
                 let msg = match e.cause() {
                     Some(c) => c.to_string(),
@@ -218,12 +212,44 @@ impl ServerHandler for XyzServer {
     }
 }
 
+/// 成功结果 → CallToolResponse：保留块信封原样透传 Content 块
+/// （spec §12.7）；其余走 §12.5 的双内容（文本 + structuredContent）。
+pub(super) fn success_response(out: serde_json::Value) -> CallToolResponse {
+    if let Some(blocks) = crate::blocks::extract(&out) {
+        let mut result = CallToolResult::error(to_rmcp_blocks(&blocks));
+        result.is_error = None;
+        result.structured_content = Some(out);
+        return CallToolResponse::Complete(result);
+    }
+    let text = render_text(&out);
+    let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
+    result.is_error = None;
+    result.structured_content = Some(out);
+    CallToolResponse::Complete(result)
+}
+
 fn render_text(v: &serde_json::Value) -> String {
     let mut buf = Vec::new();
     if crate::cli::render::render_value(&mut buf, v).is_err() {
         return v.to_string();
     }
     String::from_utf8_lossy(&buf).trim_end().to_string()
+}
+
+/// 块信封 → rmcp Content：协议级内容块保真透传（spec §12.7）。
+fn to_rmcp_blocks(blocks: &[crate::blocks::Block]) -> Vec<ContentBlock> {
+    blocks
+        .iter()
+        .map(|b| match b {
+            crate::blocks::Block::Text { text } => ContentBlock::text(text.clone()),
+            crate::blocks::Block::Image { mime_type, data } => {
+                ContentBlock::image(data.clone(), mime_type.clone())
+            }
+            crate::blocks::Block::Audio { mime_type, data } => {
+                ContentBlock::audio(data.clone(), mime_type.clone())
+            }
+        })
+        .collect()
 }
 
 fn tool_description(e: &Entry) -> String {

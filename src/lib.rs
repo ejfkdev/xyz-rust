@@ -21,7 +21,7 @@
 //! }
 //!
 //! fn main() {
-//!     define::<AddArgs, String, _>("user.add", add)
+//!     define::<AddArgs, String, _, _>("user.add", add)
 //!         .summary("添加用户")
 //!         .cli(CliHints { usage: "add <name>".into(), ..Default::default() })
 //!         .http(HTTPHints { method: "POST".into(), path: "/users/{name}".into(), ..Default::default() })
@@ -58,6 +58,7 @@ extern crate self as xyz_rust;
 mod dispatch_test;
 
 pub mod builder;
+pub mod blocks;
 pub mod builtins;
 pub mod cli;
 pub mod config;

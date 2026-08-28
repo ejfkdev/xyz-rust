@@ -58,8 +58,50 @@ pub fn render_value(w: &mut dyn Write, v: &Value) -> errors::Result<()> {
                 Ok(())
             }
         }
-        Value::Object(o) => render_kv(w, o),
+        Value::Object(o) => {
+            // 保留块信封（spec §12.7）：文本块内联、二进制块落盘打路径。
+            if let Some(blocks) = crate::blocks::extract(v) {
+                return render_blocks(w, &blocks);
+            }
+            render_kv(w, o)
+        }
     }
+}
+
+/// 渲染块清单：text 直出；image/audio 落盘临时目录、打印文件路径——
+/// 大载荷不进终端（spec §12.7 的 CLI 投影）。
+fn render_blocks(w: &mut dyn Write, blocks: &[crate::blocks::Block]) -> errors::Result<()> {
+    for b in blocks {
+        match b {
+            crate::blocks::Block::Text { text } => writeln!(w, "{text}")?,
+            crate::blocks::Block::Image { mime_type, data }
+            | crate::blocks::Block::Audio { mime_type, data } => {
+                let path = spill_to(&std::env::temp_dir(), mime_type, data)?;
+                writeln!(w, "{}", path.display())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// 把一块 base64 载荷落盘：文件名 xyz-blk-<pid>-<seq>.<ext>。
+pub fn spill_to(
+    dir: &std::path::Path,
+    mime_type: &str,
+    data: &str,
+) -> errors::Result<std::path::PathBuf> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let bytes = crate::blocks::decode_base64(data)?;
+    let ext = crate::blocks::ext_for_mime(mime_type);
+    let name = format!(
+        "xyz-blk-{}-{}.{ext}",
+        std::process::id(),
+        SEQ.fetch_add(1, Ordering::Relaxed)
+    );
+    let path = dir.join(name);
+    std::fs::write(&path, bytes)?;
+    Ok(path)
 }
 
 fn fmt_number(n: &serde_json::Number) -> String {

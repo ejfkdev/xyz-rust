@@ -269,10 +269,11 @@ fn check_reserved(
 }
 
 /// 信号接线：可用 tokio 时走 tokio::signal；纯 CLI 构建走 ctrlc。
-fn spawn_signal_watcher(ctx: Ctx) {
+/// （`_ctx`：HTTP 栈裁剪时本函数体为空，仅保留签名。）
+fn spawn_signal_watcher(_ctx: Ctx) {
     #[cfg(feature = "http-stack")]
     {
-        let ctx = ctx.clone();
+        let ctx = _ctx.clone();
         std::thread::spawn(move || {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_all()

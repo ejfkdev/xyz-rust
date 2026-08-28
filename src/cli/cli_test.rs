@@ -497,3 +497,22 @@ fn unused_serialize_bound_smoke() {
     let e = Command::new("rows.list", f).entry().unwrap();
     assert!(e.output_schema.is_some());
 }
+
+#[test]
+fn block_envelope_spills_binary_to_files() {
+    let env = serde_json::json!({"content":[
+        {"type":"text","text":"hello"},
+        {"type":"image","mimeType":"image/png","data":"aGVsbG8="}
+    ]});
+    let mut buf = Vec::new();
+    crate::cli::render::render_value(&mut buf, &env).unwrap();
+    let out = String::from_utf8(buf).unwrap();
+    let mut lines = out.lines();
+    assert_eq!(lines.next(), Some("hello"));
+    let path = lines.next().unwrap().trim();
+    assert!(path.contains("xyz-blk-"), "path = {path}");
+    assert!(path.ends_with(".png"), "path = {path}");
+    let bytes = std::fs::read(path).unwrap();
+    assert_eq!(bytes, b"hello");
+    std::fs::remove_file(path).ok();
+}
