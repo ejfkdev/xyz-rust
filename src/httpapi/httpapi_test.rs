@@ -333,3 +333,14 @@ async fn gzip_compresses_when_asked() {
     assert_eq!(resp.status().as_u16(), 200);
     assert_eq!(resp.headers().get("content-encoding").unwrap(), "gzip");
 }
+
+#[test]
+fn normalize_addr_port_shorthand() {
+    use crate::httpapi::normalize_addr;
+    assert_eq!(normalize_addr(":8080"), "0.0.0.0:8080");
+    assert_eq!(normalize_addr("127.0.0.1:8080"), "127.0.0.1:8080");
+    assert_eq!(normalize_addr("0.0.0.0:9090"), "0.0.0.0:9090");
+    // IPv6 缩写不得被误当端口简写。
+    assert_eq!(normalize_addr("::"), "::");
+    assert_eq!(normalize_addr("[::1]:8080"), "[::1]:8080");
+}

@@ -408,6 +408,17 @@ async fn collect_body(body: axum::body::Body, cap: usize) -> Vec<u8> {
 }
 
 /// serve 模式：解析裸名 flag、装配路由与中间件、TLS/优雅关停。
+/// `:8080` 简写 → `0.0.0.0:8080`（Go net.Listen 惯例；tokio 的
+/// ToSocketAddrs 不接受略主机形态）。IPv6 缩写（"::"）原样保留。
+pub(crate) fn normalize_addr(addr: &str) -> String {
+    if let Some(rest) = addr.strip_prefix(':') {
+        if !rest.contains(':') {
+            return format!("0.0.0.0:{rest}");
+        }
+    }
+    addr.to_string()
+}
+
 pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
     let cfg = crate::builtins::parse_serve_args(args, cfg);
     let sctx = Arc::new(ctx.clone());
@@ -471,7 +482,7 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
         }
     };
     rt.block_on(async move {
-        let listener = match tokio::net::TcpListener::bind(&cfg.addr).await {
+        let listener = match tokio::net::TcpListener::bind(&crate::httpapi::normalize_addr(&cfg.addr)).await {
             Ok(l) => l,
             Err(e) => {
                 crate::logx::errorf(format_args!("{e}"));

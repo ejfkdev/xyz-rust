@@ -49,6 +49,13 @@ pub trait XyzField: Sized + 'static {
     fn xyz_zero() -> Self;
     fn xyz_is_zero(&self) -> bool;
 
+    /// 该类型是否有缺席零值。联合（spec §4.7）没有自然零值：覆写为
+    /// false 后，解码管线对「缺失且非必填」直接报 invalid_input 而不再
+    /// 触碰 xyz_zero（缺省返回 true，全部既有实现零改动）。
+    fn xyz_has_zero() -> bool {
+        true
+    }
+
     /// 单条校验规则的判定（min/max/len/gt/gte/lt/lte/oneof/email）。
     fn xyz_rule_ok(&self, r: &validate::VRule) -> bool;
 

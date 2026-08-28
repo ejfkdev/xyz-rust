@@ -84,6 +84,13 @@ fn field_with_key<T: XyzField>(fi: &FieldMeta, map: &JsonMap, key: &str) -> erro
                 errors::Kind::InvalidInput,
                 format!("field {:?} is required", fi.json_name),
             )),
+            None if !T::xyz_has_zero() => Err(errors::Error::new(
+                errors::Kind::InvalidInput,
+                format!(
+                    "field {:?} has no absent form (unions need a value; use Option<…> when optional)",
+                    fi.json_name
+                ),
+            )),
             None => Ok(T::xyz_zero()),
         },
     }
@@ -141,6 +148,15 @@ pub fn field_vec<T: XyzField>(fi: &FieldMeta, map: &JsonMap) -> errors::Result<V
                 .enumerate()
                 .map(|(i, it)| {
                     if it.is_null() {
+                        if !T::xyz_has_zero() {
+                            return Err(errors::Error::new(
+                                errors::Kind::InvalidInput,
+                                format!(
+                                    "field {:?}: index {i}: null element has no absent form (union)",
+                                    fi.json_name
+                                ),
+                            ));
+                        }
                         return Ok(T::xyz_zero());
                     }
                     T::xyz_from_value(it).map_err(|e| {

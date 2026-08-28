@@ -624,3 +624,40 @@ fn tagged_union_into_entry_schema() {
     .unwrap();
     assert_eq!(serde_json::to_value(out).unwrap(), serde_json::json!("id=7"));
 }
+
+#[test]
+fn tagged_union_variant_rename_matches_serde() {
+    use crate::spec::field::meta_from_spec;
+    use crate::spec::schema::{field_schema, schema_to_value};
+    use crate::spec::XyzField;
+
+    // Bug A 实锤修复：枚举级 rename_all(="snake_case") 与变体级 rename
+    // 都要折射进 schema 的 const 判别值——与 serde 解码所认的名字同源。
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum ActionTarget {
+        ElementRef { state_id: i64 },
+        Coordinate { x: i64, y: i64 },
+        #[serde(rename = "custom-name")]
+        CustomThing { flag: bool },
+    }
+
+    // 解码认 snake_case / rename。
+    let v: ActionTarget =
+        ActionTarget::xyz_from_value(&serde_json::json!({"type": "coordinate", "x": 1, "y": 2}))
+            .unwrap();
+    assert_eq!(v, ActionTarget::Coordinate { x: 1, y: 2 });
+    let v: ActionTarget = ActionTarget::xyz_from_value(&serde_json::json!({
+        "type": "custom-name", "flag": true
+    }))
+    .unwrap();
+    assert_eq!(v, ActionTarget::CustomThing { flag: true });
+
+    // schema 判别 const 必须与 serde 同源。
+    let meta = meta_from_spec(&ActionTarget::xyz_spec_of()).unwrap();
+    let sv = schema_to_value(&field_schema(&meta));
+    let one_of = sv["oneOf"].as_array().unwrap();
+    assert_eq!(one_of[0]["properties"]["type"]["const"], "element_ref");
+    assert_eq!(one_of[1]["properties"]["type"]["const"], "coordinate");
+    assert_eq!(one_of[2]["properties"]["type"]["const"], "custom-name");
+}

@@ -516,3 +516,55 @@ fn block_envelope_spills_binary_to_files() {
     assert_eq!(bytes, b"hello");
     std::fs::remove_file(path).ok();
 }
+
+#[test]
+fn union_field_degrades_not_fatals() {
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+    use crate::spec::XyzField;
+    use crate::Ctx;
+
+    #[derive(serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
+    #[serde(tag = "type")]
+    enum Sel {
+        ById { id: i64 },
+        ByName { name: String },
+    }
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct PickArgs {
+        /// 联合字段：CLI 策略为跳过；可缺席用 Option<Sel>。
+        sel: Option<Sel>,
+        #[xyz(desc = "标记", required)]
+        tag_note: String,
+    }
+
+    fn pick(_: &Ctx, in_: &PickArgs) -> crate::errors::Result<String> {
+        Ok(format!(
+            "{}/{}",
+            in_.tag_note,
+            in_.sel
+                .as_ref()
+                .map(|_| "sel")
+                .unwrap_or("no-sel")
+        ))
+    }
+
+    let reg = Registry::new();
+    Command::new("demo.pick", pick).register(&reg).unwrap();
+    // Bug B 实锤修复：含联合字段的命令不再把整棵 CLI 树弄挂——
+    // App 构建成功，无联合字段照常调度，联合字段本身静默跳过。
+    let entry = reg.get("demo.pick").unwrap();
+    let names: Vec<String> = entry
+        .root
+        .children
+        .iter()
+        .map(|c| format!("{}:{}", c.json_name, c.kind.schema_type()))
+        .collect();
+    let (_hcode, hout, _herr) = run_app(&reg, &["demo", "pick", "-h"]);
+    let (code, _out, err) = run_app(&reg, &["demo", "pick", "--tag_note", "hi"]);
+    assert_eq!(
+        code, 0,
+        "command with union field must run (union skipped); stderr: {err}; help: {hout}; fields: {names:?}"
+    );
+}

@@ -96,8 +96,12 @@ fn serde_pairs(attrs: &[syn::Attribute]) -> Vec<(String, String)> {
                 && let Some(val) = after_str.split('"').next()
             {
                 out.push((key.clone(), val.to_string()));
-                // 跳过该字符串值
-                let consumed = after_str.find('"').map(|p| p + 1).unwrap_or(0);
+                // 跳过 前引号 + 值 + 后引号 + 逗号（p 相对 after_str：
+                // 后面还有 closing quote 与分隔逗号）。
+                let consumed = after_str
+                    .find('"')
+                    .map(|p| (p + 3).min(after.len()))
+                    .unwrap_or(0);
                 rest = &after[consumed..];
                 continue;
             }
@@ -468,9 +472,19 @@ fn expand_enum_args(
             "xyz: union enums require #[serde(tag = \"…\")] adjacent tagging (spec §4.7)",
         )
     })?;
+    // 变体线上名与 serde 全套一致：变体级 rename 优先，其次枚举级
+    // rename_all。判别 const 必须和解码（serde）认的名字完全同源，
+    // 否则 schema 通告的名字解不了码。
+    let variant_rename_all = serde_rename_all(attrs);
     let mut variant_tokens = Vec::new();
     for v in &data.variants {
-        let vname = v.ident.to_string();
+        let vname = match serde_rename(&v.attrs) {
+            Some(r) => r,
+            None => match &variant_rename_all {
+                Some(style) => rename::apply(style, &v.ident.to_string()),
+                None => v.ident.to_string(),
+            },
+        };
         let mut field_specs = Vec::new();
         for f in &v.fields {
             let fident = match &f.ident {
@@ -532,9 +546,12 @@ fn expand_enum_args(
                 })
             }
             fn xyz_zero() -> Self {
-                unreachable!("unions have no zero value (xyz_is_zero is always false)")
+                unreachable!("unions have no zero value (xyz_has_zero is false)")
             }
             fn xyz_is_zero(&self) -> bool {
+                false
+            }
+            fn xyz_has_zero() -> bool {
                 false
             }
             fn xyz_rule_ok(&self, _r: &::xyz_rust::spec::validate::VRule) -> bool {

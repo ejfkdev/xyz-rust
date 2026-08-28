@@ -284,13 +284,12 @@ fn flag_kind_for(
                 f.json_name
             ),
         )),
-        FieldKind::Union => Err(errors::Error::new(
-            errors::Kind::Internal,
-            format!(
-                "cli: command {cmd_name:?}: field {:?}: tagged union is not supported by the CLI frontend yet (spec §4.7)",
-                f.json_name
-            ),
-        )),
+        FieldKind::Union => {
+            // spec §4.7 尾部政策：CLI 无法原生表达的联合字段跳过
+            // （该命令其余字段照常、整个 CLI 不受影响）。完整 flag 形态
+            // 是后续迭代。
+            Ok((Str, false))
+        }
         FieldKind::Ptr => {
             if matches!(f.elem.as_deref().map(|e| e.kind), Some(FieldKind::Struct)) {
                 return Err(errors::Error::new(

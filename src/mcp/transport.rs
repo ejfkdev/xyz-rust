@@ -146,7 +146,7 @@ fn serve_http(opts: &Options, server: &XyzServer) -> i32 {
         }
     };
     rt.block_on(async move {
-        let listener = match tokio::net::TcpListener::bind(&addr).await {
+        let listener = match tokio::net::TcpListener::bind(&crate::httpapi::normalize_addr(&addr)).await {
             Ok(l) => l,
             Err(e) => {
                 crate::logx::errorf(format_args!("{e}"));
