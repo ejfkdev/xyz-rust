@@ -25,6 +25,12 @@ pub struct Schema {
     pub default: Option<Value>,
     #[serde(rename = "format", skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// spec §4.7：联合字段的变体分支表；其余 schema 为 None。
+    #[serde(rename = "oneOf", skip_serializing_if = "Option::is_none")]
+    pub one_of: Option<Vec<Value>>,
+    /// 判别键分支里把变体名固化为唯一值（spec §4.7 const 约定）。
+    #[serde(rename = "const", skip_serializing_if = "Option::is_none")]
+    pub r#const: Option<Value>,
 }
 
 impl Schema {
@@ -127,6 +133,43 @@ pub fn field_schema(f: &FieldMeta) -> Schema {
             }
             if !f.enum_values.is_empty() {
                 s.r#enum = Some(f.enum_values.clone());
+            }
+            s
+        }
+        FieldKind::Union => {
+            // spec §4.7：oneOf 分支 + const 判别键；每分支含该变体字段树。
+            let mut s = Schema {
+                description: opt(f.description.clone()),
+                ..Default::default()
+            };
+            if let Some(u) = &f.union {
+                let mut branches = Vec::with_capacity(u.variants.len());
+                for v in &u.variants {
+                    let mut branch = Schema::object();
+                    let props = branch.properties.as_mut().unwrap();
+                    let disc = Schema {
+                        r#type: Some("string".to_string()),
+                        r#const: Some(Value::String(v.name.clone())),
+                        ..Default::default()
+                    };
+                    let mut required = vec![u.tag.clone()];
+                    props.insert(
+                        u.tag.clone(),
+                        serde_json::to_value(&disc).unwrap_or(Value::Null),
+                    );
+                    for c in &v.meta {
+                        if c.skip {
+                            continue;
+                        }
+                        props.insert(c.json_name.clone(), schema_to_value(&field_schema(c)));
+                        if c.required {
+                            required.push(c.json_name.clone());
+                        }
+                    }
+                    branch.required = Some(required);
+                    branches.push(schema_to_value(&branch));
+                }
+                s.one_of = Some(branches);
             }
             s
         }

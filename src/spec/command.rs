@@ -284,6 +284,7 @@ where
             mcp: Default::default(),
             elem: None,
             children: fields,
+            union: None,
         };
 
         Ok(Entry {

@@ -284,6 +284,13 @@ fn flag_kind_for(
                 f.json_name
             ),
         )),
+        FieldKind::Union => Err(errors::Error::new(
+            errors::Kind::Internal,
+            format!(
+                "cli: command {cmd_name:?}: field {:?}: tagged union is not supported by the CLI frontend yet (spec §4.7)",
+                f.json_name
+            ),
+        )),
         FieldKind::Ptr => {
             if matches!(f.elem.as_deref().map(|e| e.kind), Some(FieldKind::Struct)) {
                 return Err(errors::Error::new(

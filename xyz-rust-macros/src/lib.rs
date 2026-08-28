@@ -126,6 +126,14 @@ fn serde_rename_all(attrs: &[syn::Attribute]) -> Option<String> {
         .map(|(_, v)| v)
 }
 
+/// serde `#[serde(tag = "…")]` 的判别键（联合枚举必需，spec §4.7）。
+fn serde_tag(attrs: &[syn::Attribute]) -> Option<String> {
+    serde_pairs(attrs)
+        .into_iter()
+        .find(|(k, _)| k == "tag")
+        .map(|(_, v)| v)
+}
+
 fn serde_skipped(attrs: &[syn::Attribute]) -> bool {
     for attr in attrs {
         if !attr.path().is_ident("serde") {
@@ -258,6 +266,11 @@ pub fn derive_xyz_args(input: TokenStream) -> TokenStream {
 }
 
 fn expand_xyz_args(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    // spec §4.7：enum = 邻接带标签联合。作为字段类型参与三通道
+    // （XyzField）；不可直接当 define 的根参数（根仍是 struct）。
+    if let Data::Enum(e) = &input.data {
+        return expand_enum_args(&input.ident, &input.attrs, e);
+    }
     let name = &input.ident;
     let flex = collect_fields(name, &input.data)?;
     let n_fields = flex.len();
@@ -441,6 +454,140 @@ fn expand_xyz_args(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream>
 }
 
 // ---------------------------------------------------------------------------
+/// spec §4.7：enum 派生器——生成 XyzField（联合字段）。要求
+/// `#[serde(tag = "…")]` 邻接标签；变体须具名（struct 式）字段。
+/// enum 作 define 根参数暂不开放（根仍是 struct）。
+fn expand_enum_args(
+    ident: &syn::Ident,
+    attrs: &[syn::Attribute],
+    data: &syn::DataEnum,
+) -> syn::Result<proc_macro2::TokenStream> {
+    let tag = serde_tag(attrs).ok_or_else(|| {
+        syn::Error::new_spanned(
+            ident,
+            "xyz: union enums require #[serde(tag = \"…\")] adjacent tagging (spec §4.7)",
+        )
+    })?;
+    let mut variant_tokens = Vec::new();
+    for v in &data.variants {
+        let vname = v.ident.to_string();
+        let mut field_specs = Vec::new();
+        for f in &v.fields {
+            let fident = match &f.ident {
+                Some(i) => i.to_string(),
+                None => {
+                    return Err(syn::Error::new_spanned(
+                        f,
+                        "xyz: tuple union variants are not supported; use named fields",
+                    ));
+                }
+            };
+            let attrs = parse_xyz_attr(&f.attrs)?;
+            if attrs.skip && attrs.required {
+                return Err(syn::Error::new_spanned(f, "required 与 skip 冲突"));
+            }
+            let json_name = attrs
+                .name
+                .clone()
+                .or_else(|| serde_rename(&f.attrs))
+                .unwrap_or_else(|| fident.clone());
+            let flex = FlexField {
+                rust_name: fident,
+                json_name,
+                attrs,
+                ty: f.ty.clone(),
+            };
+            field_specs.push(field_spec_literal(&flex));
+        }
+        let vlit = syn::LitStr::new(&vname, proc_macro2::Span::call_site());
+        variant_tokens.push(quote! {
+            ::xyz_rust::spec::field::UnionVariantSpec {
+                name: #vlit,
+                fields: vec![ #(#field_specs),* ],
+            }
+        });
+    }
+    Ok(quote! {
+        impl ::xyz_rust::spec::XyzField for #ident {
+            fn xyz_spec_of() -> ::xyz_rust::spec::field::FieldSpec {
+                let mut __s = ::xyz_rust::spec::field::synthetic(
+                    ::xyz_rust::spec::field::FieldKind::Union,
+                    Vec::new(),
+                    None,
+                );
+                __s.union = Some(::xyz_rust::spec::field::UnionSpec {
+                    tag: #tag,
+                    variants: vec![ #(#variant_tokens),* ],
+                });
+                __s
+            }
+            fn xyz_from_value(
+                __v: &::xyz_rust::serde_json::Value,
+            ) -> ::xyz_rust::errors::Result<Self> {
+                ::xyz_rust::serde_json::from_value(__v.clone()).map_err(|e| {
+                    ::xyz_rust::errors::Error::new(
+                        ::xyz_rust::errors::Kind::InvalidInput,
+                        format!("union decode: {e}"),
+                    )
+                })
+            }
+            fn xyz_zero() -> Self {
+                unreachable!("unions have no zero value (xyz_is_zero is always false)")
+            }
+            fn xyz_is_zero(&self) -> bool {
+                false
+            }
+            fn xyz_rule_ok(&self, _r: &::xyz_rust::spec::validate::VRule) -> bool {
+                false
+            }
+            fn xyz_fmt(&self) -> String {
+                "<union>".to_string()
+            }
+        }
+    })
+}
+
+/// 单个变体字段的 FieldSpec 字面量（与 struct 主路径同构）。
+fn field_spec_literal(f: &FlexField) -> proc_macro2::TokenStream {
+    let lit = |s: &str| syn::LitStr::new(s, proc_macro2::Span::call_site());
+    let rust_name = lit(&f.rust_name);
+    let json_name = lit(&f.json_name);
+    let a = &f.attrs;
+    let desc = lit(a.desc.as_deref().unwrap_or_default());
+    let required = a.required;
+    let secret = a.secret;
+    let skip = a.skip;
+    let validate = lit(a.validate.as_deref().unwrap_or_default());
+    let enum_s = lit(a.enum_s.as_deref().unwrap_or_default());
+    let default_s = lit(a.default.as_deref().unwrap_or_default());
+    let cli_s = lit(a.cli.as_deref().unwrap_or_default());
+    let http_s = lit(a.http.as_deref().unwrap_or_default());
+    let http_name = match &a.http_name {
+        Some(n) => {
+            let l = syn::LitStr::new(n, proc_macro2::Span::call_site());
+            quote! { Some(#l) }
+        }
+        None => quote! { None },
+    };
+    let shape = shape::spec_expr(&f.ty);
+    quote! {{
+        let mut __s = #shape;
+        __s.rust_name = #rust_name;
+        __s.json_name = #json_name;
+        __s.desc = #desc;
+        __s.required = #required;
+        __s.secret = #secret;
+        __s.skip = #skip;
+        __s.validate_s = #validate;
+        __s.enum_s = #enum_s;
+        __s.default_s = #default_s;
+        __s.cli_s = #cli_s;
+        __s.http_s = #http_s;
+        __s.http_name = #http_name;
+        __s
+    }}
+}
+
 // #[derive(XyzField)] — 命名标量 newtype：单字段元组 struct
 // ---------------------------------------------------------------------------
 
@@ -603,6 +750,8 @@ fn expand_xyz_output(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStrea
                     r#enum: None,
                     default: None,
                     format: None,
+                    one_of: None,
+                    r#const: None,
                 })
             }
         }

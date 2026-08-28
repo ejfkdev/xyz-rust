@@ -524,3 +524,103 @@ fn spec_depth_guard_panics_on_deep_nesting() {
     });
     assert!(result.is_err());
 }
+
+#[test]
+fn tagged_union_schema_and_decode() {
+    use crate::spec::field::FieldKind;
+    use crate::spec::XyzField;
+
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
+    #[serde(tag = "type")]
+    enum Target {
+        Element { state_id: i64, index: i64 },
+        Coordinate {
+            #[xyz(desc = "横坐标", required)]
+            x: i64,
+            y: i64,
+        },
+        Noop,
+    }
+
+    // 解码：tag 判别、恰好一分支；错误归 invalid_input。
+    let e: Target =
+        Target::xyz_from_value(&serde_json::json!({"type": "Element", "state_id": 9, "index": 1}))
+            .unwrap();
+    assert_eq!(e, Target::Element { state_id: 9, index: 1 });
+    let c: Target = Target::xyz_from_value(&serde_json::json!({"type": "Coordinate", "x": 1, "y": 2}))
+        .unwrap();
+    assert_eq!(c, Target::Coordinate { x: 1, y: 2 });
+    assert!(Target::xyz_from_value(&serde_json::json!({"type": "Ghost"})).is_err());
+    assert!(Target::xyz_from_value(&serde_json::json!({"x": 1, "y": 2})).is_err());
+    assert!(Target::xyz_from_value(&serde_json::json!({"type": "Element"})).is_err()); // 缺字段
+    assert_eq!(
+        Target::xyz_from_value(&serde_json::json!({"type": "Noop"})).unwrap(),
+        Target::Noop
+    );
+
+    // 元数据：Union kind + 变体树；schema 层出 oneOf + const 判别。
+    let meta = crate::spec::field::meta_from_spec(&Target::xyz_spec_of()).unwrap();
+    assert!(matches!(meta.kind, FieldKind::Union));
+    let union = meta.union.as_ref().expect("union tree");
+    assert_eq!(union.tag, "type");
+    assert_eq!(union.variants.len(), 3);
+    assert_eq!(union.variants[0].name, "Element");
+    assert_eq!(union.variants[0].meta.len(), 2);
+
+    let union_schema = crate::spec::schema::field_schema(&meta);
+    let sv = crate::spec::schema::schema_to_value(&union_schema);
+    let one_of = sv["oneOf"].as_array().expect("oneOf array");
+    assert_eq!(one_of.len(), 3);
+    let branch = &one_of[1]; // Coordinate
+    assert_eq!(branch["required"], serde_json::json!(["type", "x"]));
+    assert_eq!(branch["properties"]["type"]["const"], "Coordinate");
+    assert_eq!(branch["properties"]["type"]["type"], "string");
+    assert_eq!(branch["properties"]["x"]["type"], "integer");
+    assert_eq!(branch["properties"]["x"]["description"], "横坐标");
+    // Noop 分支只有判别键
+    assert_eq!(one_of[2]["required"], serde_json::json!(["type"]));
+}
+
+#[test]
+fn tagged_union_into_entry_schema() {
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+    use crate::spec::XyzArgs;
+    use crate::Ctx;
+
+    #[derive(serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
+    #[serde(tag = "kind")]
+    enum Sel {
+        ById { id: i64 },
+        ByName { name: String },
+    }
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct PickArgs {
+        #[xyz(required, desc = "选择器")]
+        sel: Sel,
+    }
+
+    fn pick(_: &Ctx, in_: &PickArgs) -> crate::errors::Result<String> {
+        Ok(match &in_.sel {
+            Sel::ById { id } => format!("id={id}"),
+            Sel::ByName { name } => name.clone(),
+        })
+    }
+
+    let reg = Registry::new();
+    Command::new("demo.pick", pick)
+        .register(&reg)
+        .unwrap();
+    let entry = reg.get("demo.pick").unwrap();
+    let sch = crate::spec::schema::schema_to_value(&entry.input_schema);
+    let sel = &sch["properties"]["sel"];
+    assert_eq!(sel["oneOf"].as_array().unwrap().len(), 2);
+    // 端到端 invoke：JSON 形态走 serde 判别。
+    let out = (entry.invoke)(
+        &Ctx::new(),
+        &serde_json::from_str(r#"{"sel":{"kind":"ById","id":7}}"#).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(serde_json::to_value(out).unwrap(), serde_json::json!("id=7"));
+}

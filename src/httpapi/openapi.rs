@@ -158,7 +158,7 @@ fn schema_type(f: &FieldMeta) -> &'static str {
         | FieldKind::U64 => "integer",
         FieldKind::F32 | FieldKind::F64 => "number",
         FieldKind::Slice => "array",
-        FieldKind::Struct => "object",
+        FieldKind::Struct | FieldKind::Union => "object",
         _ => "string", // String/Duration/Time/Bytes/Ptr
     }
 }

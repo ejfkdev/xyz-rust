@@ -39,6 +39,8 @@ pub enum FieldKind {
     Slice,
     /// 嵌套 struct / 命名 newtype 的归宿。
     Struct,
+    /// spec §4.7 邻接带标签联合（enum 字段）；变体树放 FieldMeta.union。
+    Union,
 }
 
 impl FieldKind {
@@ -60,7 +62,7 @@ impl FieldKind {
             FieldKind::F32 | FieldKind::F64 => "number",
             FieldKind::Slice => "array",
             FieldKind::Ptr => "pointer",
-            FieldKind::Struct => "object",
+            FieldKind::Struct | FieldKind::Union => "object",
         }
     }
 
@@ -85,6 +87,36 @@ impl FieldKind {
     pub fn is_numeric(&self) -> bool {
         self.is_scalar() && !matches!(self, FieldKind::String | FieldKind::Bool)
     }
+}
+
+/// 联合的静态树（宏在注册链路上构建；tag/name 是 'static 字面量，
+/// 字段树用 owned 容器——FieldSpec 含 Vec 不可 const，宏以 vec! 生成）。
+#[derive(Debug, Clone)]
+pub struct UnionSpec {
+    /// serde `#[serde(tag = "…")]` 的判别键。
+    pub tag: &'static str,
+    /// 各变体的字段树。
+    pub variants: Vec<UnionVariantSpec>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionVariantSpec {
+    pub name: &'static str,
+    pub fields: Vec<FieldSpec>,
+}
+
+/// 联合的运行时树（FieldSpec 解析产物）。
+#[derive(Debug, Clone)]
+pub struct UnionMeta {
+    pub tag: String,
+    pub variants: Vec<UnionVariant>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UnionVariant {
+    pub name: String,
+    /// 变体字段的运行时元数据（嵌套校验/解码用）。
+    pub meta: Vec<FieldMeta>,
 }
 
 /// 静态字段描述（宏按声明序生成的字段树节点）。
@@ -116,6 +148,8 @@ pub struct FieldSpec {
     pub elem: Option<Box<FieldSpec>>,
     /// struct 的子字段。
     pub children: Vec<FieldSpec>,
+    /// 联合的静态树（kind == Union 时填充）。
+    pub union: Option<UnionSpec>,
 }
 
 /// 宏生成结构的元素/裸类型节点（无名字的合成包装）。
@@ -140,6 +174,7 @@ pub fn synthetic(
         http_name: None,
         elem,
         children,
+        union: None,
     }
 }
 
@@ -193,6 +228,8 @@ pub struct FieldMeta {
     pub elem: Option<Box<FieldMeta>>,
     /// struct 的子字段。
     pub children: Vec<FieldMeta>,
+    /// 联合的运行时树（kind == Union 时填充；变体字段表）。
+    pub union: Option<UnionMeta>,
 }
 
 /// 宏内自引用的护栏：递归类型（Node 里套 Node）在生成字段树时栈溢出前
@@ -242,6 +279,26 @@ pub fn meta_from_spec(spec: &FieldSpec) -> errors::Result<FieldMeta> {
         .iter()
         .map(meta_from_spec)
         .collect::<errors::Result<Vec<_>>>()?;
+    let union = match &spec.union {
+        Some(u) => Some(UnionMeta {
+            tag: u.tag.to_string(),
+            variants: u
+                .variants
+                .iter()
+                .map(|v| {
+                    Ok(UnionVariant {
+                        name: v.name.to_string(),
+                        meta: v
+                            .fields
+                            .iter()
+                            .map(meta_from_spec)
+                            .collect::<errors::Result<Vec<_>>>()?,
+                    })
+                })
+                .collect::<errors::Result<Vec<_>>>()?,
+        }),
+        None => None,
+    };
     Ok(FieldMeta {
         name: spec.rust_name.to_string(),
         json_name: spec.json_name.to_string(),
@@ -259,6 +316,7 @@ pub fn meta_from_spec(spec: &FieldSpec) -> errors::Result<FieldMeta> {
         mcp: MCPField::default(),
         elem,
         children,
+        union,
     })
 }
 
