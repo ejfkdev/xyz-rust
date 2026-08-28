@@ -287,8 +287,29 @@ Handlers have the shape `fn(&Ctx, &Args) -> Result<Resp, E>` where `E` is any `s
 | `struct` | aligned `key  value` columns | JSON object |
 | `Vec<struct>` | aligned table (header + rule) | JSON array |
 | `map` | key/value pairs in (insertion) order | JSON object |
+| `xyz_rust::Blocks` (spec §12.7) | text blocks inline; binary blocks written to temp files, paths printed | block envelope JSON (`{"content":[…]}`); MCP carries the blocks verbatim as `Content` |
 
 Structs and maps render through the same `serde_json::Value` path (declaration order preserved via `preserve_order`) — see the [differences section](#differences-from-the-go-implementation).
+
+### Tagged unions (`oneOf`, spec §4.7)
+
+Enum argument fields with `#[serde(tag = "…")]` adjacent tagging become
+`oneOf` inputSchema branches — one per variant, discriminator pinned with a
+`const`:
+
+```rust
+#[derive(xyz_rust::XyzArgs, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+enum Target {
+    Element { state_id: i64, index: i64 },
+    Coordinate { x: i64, y: i64 },
+}
+```
+
+Decoding selects exactly one branch (zero or multiple matches are
+`invalid_input`). Untagged or internally-tagged enums are rejected at
+compile time. The CLI frontend rejects union fields at registration for
+now (same stance as nested structs).
 
 ## Error taxonomy
 

@@ -278,8 +278,27 @@ handler 形态为 `fn(&Ctx, &Args) -> Result<Resp, E>`：`E` 是任意 `std::err
 | `struct` | 对齐 `key  value` 两列 | JSON 对象 |
 | `Vec<struct>` | 对齐表格（表头+分隔线） | JSON 数组 |
 | `map` | 按键值对（插入序）输出 | JSON 对象 |
+| `xyz_rust::Blocks`（spec §12.7） | 文本块内联；二进制块写入临时文件、打印路径 | 块信封 JSON（`{"content":[…]}`）；MCP 以 `Content` 原样携带块 |
 
 struct 与 map 走同一条 `serde_json::Value` 渲染路径（`preserve_order` 保留声明序）——见[与 Go 版差异](#与-go-版差异)。
+
+### 带标签联合（`oneOf`，spec §4.7）
+
+带 `#[serde(tag = "…")]` 邻接标签的枚举参数字段会生成 `oneOf`
+inputSchema 分支——每个变体一分支，判别键以 `const` 固化：
+
+```rust
+#[derive(xyz_rust::XyzArgs, serde::Serialize, serde::Deserialize)]
+#[serde(tag = "type")]
+enum Target {
+    Element { state_id: i64, index: i64 },
+    Coordinate { x: i64, y: i64 },
+}
+```
+
+解码恰好命中一个分支（零个/多个匹配都是 `invalid_input`）。无标签或内部
+标签的枚举在编译期拒绝。CLI 前端目前对联合字段注册期报错（与嵌套 struct
+同一立场）。
 
 ## 错误分类
 
