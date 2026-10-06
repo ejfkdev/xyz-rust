@@ -522,7 +522,6 @@ fn block_envelope_spills_binary_to_files() {
 fn union_field_degrades_not_fatals() {
     use crate::Ctx;
     use crate::registry::Registry;
-    use crate::spec::XyzField;
     use crate::spec::command::Command;
 
     #[derive(serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
