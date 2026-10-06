@@ -63,7 +63,9 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP: every command becomes 
 - **One pipeline across all three interfaces**: CLI (strings), HTTP (JSON) and MCP arguments are normalized into the same `serde_json` map and flow through the same decode → defaults → validate → handler path, so behavior never drifts.
 - **Per-interface fine-tuning**: shorthands, aliases, env fallbacks, binding locations — and **interface-specific default values** (two-tier layering: global attribute default → per-interface override).
 - **Envelope-free responses**: primitives print bare, structs align as `key value` columns, `Vec<struct>` becomes a table, `--json` flips to JSON; HTTP answers bare JSON; MCP returns both `structuredContent` and human `textContent`.
-- **One error taxonomy**: a single `errs::new(errs::Kind::NotFound, ...)` drives the CLI exit code, the HTTP status code and the MCP error code simultaneously.
+- **One error taxonomy — with rich context**: a single `errs::new(errs::Kind::NotFound, ...)` drives the CLI exit code, the HTTP status code and the MCP error code simultaneously; `with_code/with_detail/with_status` attach the §8.5 layers and every channel shares one error body (`{error, kind, code, detail}`, spec §8.6).
+- **TTY-aware output**: `--format auto` (the default) renders `text` on an interactive terminal and `jsonl` when piped; `--format text|json|jsonl|markdown` and the `--json` alias pick explicitly, with the precedence bare flag > `--xyz.format` > `CliHints.format` > `Config.Format` > auto (spec §10.7).
+- **Four modes, namespaced**: `serve` (REST + `/mcp`), `http` (REST only), `mcp`, `help` — each also reachable as the always-available, help-hidden `xyz.<word>`; user commands whose top-level segment equals a mode word shadow the bare form (spec §13.1).
 - **Dependency hygiene**: the core modules (spec / registry / errors / cli / logx / root) have zero third-party dependencies apart from the serde family and chrono; the only other third-party tree is the official Rust SDK (rmcp), removable wholesale with `--no-default-features` (smallest trimmed build ≈ 0.81M).
 - **Protocol versions under control**: MCP speaks the five spec revisions from 2024-11-05 to 2026-07-28; `--versions` pins the subset. Tools also carry a macro-generated `outputSchema` (OpenAPI response schemas share the same source).
 - **Production-friendly**: SIGINT/SIGTERM graceful shutdown (`Ctx` flows into handlers), `/healthz` probe, gzip, CLI help with inline `(default …)`/`(env …)`/`(oneof …)` hints, and `completion bash|zsh|fish`.
@@ -140,14 +142,25 @@ explicit flag > env fallback > interface default > global attribute default (Inv
 
 Mechanism: each frontend injects its own overrides (`Entry.cli_defaults()/http_defaults()/mcp_defaults()`) before calling `Entry.invoke`, which then applies global attribute defaults — one pipeline, drift-free. MCP's overrides also replace `default` in `inputSchema` (the schema is MCP's contract).
 
-## Three modes
+## Modes
 
 ```
-xyz-example [command] [args]    CLI: subcommand tree, shorthands/aliases/-h/-v/--json/positionals/env
-xyz-example serve --addr :8080  HTTP: REST routes + /openapi.json + /mcp on the same port
-xyz-example mcp stdio|http      MCP: official Rust SDK, two transports (--versions pins revisions)
+xyz-example [command] [args]        CLI: subcommand tree, shorthands/aliases/-h/-v/--format/positionals/env
+xyz-example serve --addr :8080      HTTP: REST routes + /openapi.json + /mcp on the same port
+xyz-example http  --addr :8080      HTTP: REST routes + /openapi.json only (no /mcp)
+xyz-example mcp stdio|http          MCP: official Rust SDK, two transports (--versions pins revisions)
+xyz-example help [mode|command]     help: overview / a mode's help / detailed command help
 xyz-example completion bash|zsh|fish   Built-in shell completion scripts
 ```
+
+`help` takes arguments (dotted or spaced command paths both work: `help user.add`
+≡ `help user add`), and `serve -h` / `http -h` / `mcp -h` print the mode's own
+help and exit without starting a server (spec §10.4/§13.2). Every mode word is
+also reachable through its always-available, help-hidden `xyz.<word>` form; a
+user command whose top-level segment equals a mode word *shadows* the bare
+form — the bare word routes to the user command and the built-in stays
+reachable via `xyz.<word>`, so names like `serve.*` are no longer reserved
+(spec §13.1).
 
 ## Command channels, daemons & composable dispatch
 
@@ -231,9 +244,18 @@ define("extract", extract)
 
 **CLI** (std + serde; no clap in the shipped frontend — `examples/clap` shows how to bring your own): registry name `user.add` becomes the two-level subcommand `user add`; `-h/--help` prints per-command help (with inline `(default …)`/`(env …)`/`(oneof …)` hints), -v/--version` prints the *application* version (default `dev`, overridable with `set_version("v1.2.3")` — Rust has no `-ldflags -X` equivalent; the xyz SDK's own version is reported separately as `X-XYZ-Version`/`_meta.xyz.sdk_version`, spec §11.6/§12.8).
 
-**HTTP** (axum): routes come straight from `HTTPHints { method, path }` (`{name}` is a path parameter bound to a field with `http = "path"`); fields without an `http:` attribute bind from the query string by default, a JSON body merges as the argument base; supported methods are GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS (others are a registration error); the error taxonomy maps to status codes (400/401/403/404/409/499/500/503) with `{"error":"..."}` bodies; `GET /openapi.json` serves an OpenAPI 3 document from the same `InputSchema` (response schemas included); `GET /healthz` probes liveness and gzip is answered transparently. Commands without HTTP hints are not routed.
+Output formats: `--format auto|text|json|jsonl|markdown` (with `--json` as the
+`json` alias) — `auto` is the default and resolves at render time from the TTY
+(interactive → `text`, piped/redirected → `jsonl`; both halves configurable via
+`Config.FormatInteractive`/`FormatPiped`, forceable for tests/embedding via
+`cli::Options { interactive: Some(..) }`). Precedence: bare `--format`/`--json`
+(when not shadowed by a command's own flag) > `--xyz.format` > `CliHints.format`
+> `Config.Format` > `auto`. In the machine formats (`json`/`jsonl`) a command
+error is written to stderr as the shared §8.6 error object.
 
-**MCP** (official Rust SDK, rmcp): commands become tools; `tools/list` serves the macro-generated `inputSchema` **and `outputSchema`**; success returns dual content — `structuredContent` (bare JSON) + `textContent` (the CLI-style rendering); failures return `isError: true` with the classified message. Supported spec revisions: `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`, `2026-07-28` (the newest is the handshake-free `server/discover` era); `mcp http --versions 2025-06-18,2026-07-28` pins the subset. Built-in constraints: streamable HTTP serves 2026-07-28 only with `--stateless` (SEP-2567); the SDK's streamable-HTTP server allows only loopback `Host` headers by default (its DNS-rebinding protection). `mcp sse` answers a clear error and exits 2 — see [the differences section](#differences-from-the-go-implementation).
+**HTTP** (axum): routes come straight from `HTTPHints { method, path }` (`{name}` is a path parameter bound to a field with `http = "path"`); fields without an `http:` attribute bind from the query string by default, a JSON body merges as the argument base; supported methods are GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS (others are a registration error); the error taxonomy maps to status codes (400/401/403/404/409/499/500/503) with the shared §8.6 error body (`{"error":"...","kind":"...","code":"...","detail":{...}}` — flat `error` stays byte-compatible; an explicit `with_status` overrides the Kind-derived code; unmatched routes answer a localized JSON 404); per-request interface language comes from `Accept-Language` (q-ordered, `zh*`→zh-CN/`en*`→en, readable by handlers via `language_from_ctx`, spec §11.7); every response carries server-context headers (`X-App-Name`, `X-App-Version`, `X-XYZ-Version`; per-route `X-XYZ-Command`/`X-XYZ-Duration-Ms`) plus user-defined static headers (`--xyz.header k=v`; suppress the automatic set with `--xyz.no-server-headers`); `GET /openapi.json` serves an OpenAPI 3 document from the same `InputSchema` (response schemas included); `GET /healthz` probes liveness and gzip is answered transparently. Commands without HTTP hints are not routed.
+
+**MCP** (official Rust SDK, rmcp): commands become tools; `tools/list` serves the macro-generated `inputSchema` **and `outputSchema`**; success returns dual content — `structuredContent` (bare JSON) + `textContent` (the CLI-style rendering); failures return `isError: true` with the classified message. Supported spec revisions: `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`, `2026-07-28` (the newest is the handshake-free `server/discover` era); `mcp http --versions 2025-06-18,2026-07-28` pins the subset. Every result carries `_meta.xyz` server context — `app_name`/`app_version`/`sdk_version`/`command`/`duration_ms` (+ `headers` when configured), and on failures an `error` sub-object with `kind`/`code`/`detail` — while `serverInfo` reports the *application* identity (basename / built version unless `Config.name`/`Config.version` override; spec §12.6/§12.8). Built-in constraints: streamable HTTP serves 2026-07-28 only with `--stateless` (SEP-2567); the SDK's streamable-HTTP server allows only loopback `Host` headers by default (its DNS-rebinding protection). `mcp sse` answers a clear error and exits 2 — see [the differences section](#differences-from-the-go-implementation).
 
 A larger real command — attributes, three-layer defaults, error classification, named scalar, `Vec<u8>` and header/env injection all in one definition (taken from [examples/example/src/main.rs](examples/example/src/main.rs)):
 
@@ -390,6 +412,8 @@ let srv = xyz_rust::mcp::server(&reg, xyz_rust::mcp::Options {
 }, ctx)?;
 let router = xyz_rust::httpapi::router(&reg, ctx)?;    // mount all HTTP routes (healthz & openapi included)
 let one = xyz_rust::httpapi::handler_for(entry);       // mount one command on any axum Router (entry: Arc<Entry>)
+let env = xyz_rust::env();                             // §14 item 7: { language, interactive, no_color }
+let lang = xyz_rust::language_from_ctx(ctx);           // per-request language (§11.7)
 let mut app = xyz_rust::cli::App::new_with_options(&reg, xyz_rust::cli::Options::default())?;
 // app.set_output(Some(out_writer), Some(err_writer)); // redirect output streams
 app.use_mw(Box::new(mw));                              // Execute middleware: rewrite args, short-circuit, wrap next()
@@ -408,7 +432,7 @@ Already on clap / axum? See the [migration guide](docs/adapters.md) with a runna
 2. **serde enters the core.** Rust's std has no JSON, so the core (spec / registry / errors / cli / logx / root) depends on serde + serde_json — the "missing standard library" — and chrono (time types), and nothing else. `httpapi` sits on axum (the de-facto standard HTTP stack in Rust, the same stack the official rmcp streamable-HTTP examples use), and `mcp` on the official Rust SDK `rmcp` pinned to `=3.1.4` — the only other direct third-party dependency tree. `http` and `mcp` share the tokio+axum cluster behind the internal `http-stack` feature.
 3. **No reflection.** What Go derives at runtime from struct tags is generated at compile time by the derive macros. The attribute vocabulary is `#[xyz(desc="...", name="w", required, secret, skip, validate="min=2,email", default="18", enum="a,b", cli="positional"/"shorthand=a,env=X"/"hidden"/"-", http="query|path|header|form|body", http_name="X-Key")]` — one-to-one with the Go tags, plus the serde `rename` fallback and `rename_all` support. Named scalar newtypes derive `XyzField`; result structs derive `Serialize` + `XyzOutput` with wire names following serde conventions, or no derive at all — a `XyzArgs` input struct automatically provides `XyzSchema`.
 4. **Handler shape.** `fn(handler(_: &Ctx, _: &Args) -> Result<Resp, E>)` with `E: std::error::Error` (classification on the error chain is preserved) and `R: Serialize`. `define("name", h)` is fully inferred — no Go-style explicit `Define[T, R]` generics.
-5. **Result rendering.** Structs and maps are the same shape: both become a `serde_json::Value` after serialization, and `preserve_order` keeps declaration order (Go sorts map keys); a `Vec<u8>` result type gets an array-shaped output schema (its input side is still `string`); `std::time::Duration` has no negative-value support (Rust semantics); `oneof` has no `%v` form for structs.
+5. **Result rendering.** Structs and maps are the same shape: both become a `serde_json::Value` after serialization, and `preserve_order` keeps declaration order (Go sorts map keys); a `Vec<u8>` result type gets an array-shaped output schema (its input side is still `string`); `std::time::Duration` has no negative-value support (Rust semantics); `oneof` has no `%v` form for structs; in `--format markdown` a struct and a map are indistinguishable after serialization, so both use the `| Field | Value |` header (Go uses `| Key | Value |` for maps).
 6. **Version injection.** Call `set_version("v1.2.3")` at release time — Rust has no `-ldflags -X`; the default *application* version is `dev` (xyz-spec §12.6). The SDK's own version (`version::SDK_VERSION`, crate version) is reported apart on HTTP `X-XYZ-Version` and `_meta.xyz.sdk_version`.
 7. **HTTP semantics.** Gzip via `tower-http` (compresses any response size and handles `Accept-Encoding` q-values; the Go port only checks the header); per-request timeout via `TimeoutLayer` answering **408** (not 504); request-level cancellation: a client disconnect does not interrupt the running handler; the standard header timeout is not configured (a non-zero `Config.timeout` is the only timeout layer).
 8. **MCP differences.** `--versions` accepts the same full set as Go — `2024-11-05`, `2025-03-26`, `2025-06-18`, `2025-11-25`, `2026-07-28` (newest) — but version pinning is handed to the SDK's negotiation via `supported_protocol_versions`; streamable HTTP serves 2026-07-28 only with `--stateless`; and the SDK's streamable-HTTP server allows only loopback `Host` headers by default (rmcp's DNS-rebinding protection).

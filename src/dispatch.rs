@@ -266,7 +266,7 @@ impl Words {
 
 /// 命中的内建模式（spec §13.2 第 5 步）。
 #[derive(PartialEq, Eq, Clone, Copy)]
-enum ModeKind {
+pub(crate) enum ModeKind {
     Serve,
     Http,
     Mcp,
@@ -429,8 +429,8 @@ fn run_help(
     }
 }
 
-/// 打印某个模式的帮助（spec §10.4/§13.2），不起服务。
-fn print_mode_help(kind: ModeKind, w: &Words) -> i32 {
+/// 某个模式的帮助文本（spec §10.4/§13.2；纯函数便于测试）。
+pub(crate) fn mode_help_text(kind: ModeKind, w: &Words) -> String {
     let key = match kind {
         ModeKind::Serve => "mode_help.serve",
         ModeKind::Http => "mode_help.http",
@@ -443,7 +443,12 @@ fn print_mode_help(kind: ModeKind, w: &Words) -> i32 {
         ModeKind::Mcp => &w.mcp,
         _ => &w.help,
     };
-    println!("{}", crate::lang::tf(key, &[word]));
+    crate::lang::tf(key, &[word])
+}
+
+/// 打印某个模式的帮助（spec §10.4/§13.2），不起服务。
+fn print_mode_help(kind: ModeKind, w: &Words) -> i32 {
+    println!("{}", mode_help_text(kind, w));
     0
 }
 

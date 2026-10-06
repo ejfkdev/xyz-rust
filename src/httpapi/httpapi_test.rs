@@ -525,3 +525,30 @@ async fn accept_language_localizes_and_reaches_handler() {
     assert_eq!(status, 400);
     assert!(out.contains("无效的 JSON 请求体"), "{out}");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn missing_route_is_localized_json_404() {
+    let router = httpapi::router(&add_reg(), Arc::new(Ctx::new())).unwrap();
+    // 无 header：JSON 错误体（进程语言文本非空）。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/no/such/route")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router.clone(), req).await;
+    assert_eq!(status, 404);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert!(v["error"].as_str().is_some_and(|s| !s.is_empty()));
+
+    // 带 zh-CN：本地化文案确定性断言。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/no/such/route")
+        .header("Accept-Language", "zh-CN")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router, req).await;
+    assert_eq!(status, 404);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["error"], "未找到");
+}

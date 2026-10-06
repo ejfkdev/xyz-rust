@@ -64,7 +64,9 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP：注册的命令即工
 - **三通道共用一条管线**：CLI（字符串）、HTTP（JSON）、MCP arguments 先归约成同一个 `serde_json` map，再走「解码 → 默认值 → 校验 → handler」的唯一路径，行为不漂移。
 - **逐通道精细配置**：短名、别名、env 注入、绑定位置、**通道专属默认值**（全局属性默认 → 通道覆盖两级分层）。
 - **无信封响应**：基础类型裸输出、struct 键值对齐、`Vec<struct>` 表格、`--json` 翻转；HTTP 裸 JSON；MCP `structuredContent` + `textContent` 双份。
-- **统一错误分类**：一条 `errs::new(errs::Kind::NotFound, ...)` 同时驱动 CLI 退出码、HTTP 状态码、MCP 错误码。
+- **统一错误分类 + 富化上下文**：一条 `errs::new(errs::Kind::NotFound, ...)` 同时驱动 CLI 退出码、HTTP 状态码、MCP 错误码；`with_code/with_detail/with_status` 挂载 §8.5 三层富化，三通道共享同一错误体（`{error, kind, code, detail}`，spec §8.6）。
+- **TTY 感知输出**：`--format auto`（默认）在交互式终端渲染 `text`、被管道/重定向时渲染 `jsonl`；`--format text|json|jsonl|markdown` 与 `--json` 别名可显式指定，优先级 bare 标志 > `--xyz.format` > `CliHints.format` > `Config.Format` > auto（spec §10.7）。
+- **四模式与命名空间**：`serve`（REST + `/mcp`）、`http`（仅 REST）、`mcp`、`help`——每个词都有恒可达、帮助隐藏的 `xyz.<词>` 形式；顶层段等于模式词的用户命令会遮蔽裸词（spec §13.1）。
 - **依赖洁癖**：核心模块（spec/registry/errors/cli/logx/根）除 serde 家族与 chrono 外**零第三方依赖**；唯一的其他第三方树是官方 Rust SDK（rmcp），可用 `--no-default-features` 整体剔除；按通道裁剪后最小约 0.81M。
 - **协议版本可控**：MCP 支持 2024-11-05 至 2026-07-28 五个规范版本，`--versions` 一键限定；工具同时携带派生宏生成的 `outputSchema`（OpenAPI 响应 schema 同源）。
 - **生产友好**：SIGINT/SIGTERM 优雅关停（`Ctx` 贯穿到 handler）、`/healthz` 探活、gzip、CLI 帮助内联默认值/env/枚举、`completion bash|zsh|fish`。
@@ -141,14 +143,22 @@ flag 显式传值 > env 回退 > CLI 专属默认值 > 全局属性默认值（I
 
 机制：各前端在调 `Entry.invoke` 前注入自己的覆盖默认（`Entry.cli_defaults()/http_defaults()/mcp_defaults()`），核心管线只有一条。MCP 的覆盖默认同时替换 `inputSchema` 里的 `default`（schema 是 MCP 的契约）。
 
-## 三种运行形态
+## 运行模式
 
 ```
-xyz-example [命令] [参数]         CLI：子命令树、短名/别名/-h/-v/--json/位置参数/env
+xyz-example [命令] [参数]         CLI：子命令树、短名/别名/-h/-v/--format/位置参数/env
 xyz-example serve --addr :8080    HTTP：REST 路由 + /openapi.json + 同端口 /mcp
+xyz-example http  --addr :8080    HTTP：仅 REST 路由 + /openapi.json（不挂 /mcp）
 xyz-example mcp stdio|http        MCP：官方 Rust SDK，两种传输（--versions 限定协议版本）
+xyz-example help [模式|命令]      帮助：总览 / 某模式帮助 / 某命令详细帮助
 xyz-example completion bash|zsh|fish   内置 shell 补全脚本
 ```
+
+`help` 可带参数（命令路径点分或空格皆可：`help user.add` ≡ `help user add`），
+`serve -h` / `http -h` / `mcp -h` 打印所属模式的帮助并退出、**不起服务**
+（spec §10.4/§13.2）。每个模式词还都有恒可达、不出现在帮助里的 `xyz.<词>`
+形式；顶层段等于模式词的用户命令会**遮蔽**裸词——裸词路由到用户命令，内建
+经 `xyz.<词>` 仍可达，`serve.*` 这类名字不再被保留（spec §13.1）。
 ## 命令通道、长驻命令与可组合派发
 
 - **单命令通道开关**：`CliHints { skip }`、`HTTPHints { skip }`、
@@ -222,9 +232,11 @@ define("extract", extract)
 
 **CLI**（std + serde；自带前端不引 clap——`examples/clap` 演示如何换用 clap）：注册名 `user.add` 生成两级子命令 `user add`；`-h/--help` 逐命令帮助（内联 `(default …)`/`(env …)`/`(oneof …)` 提示），-v/--version` 输出*应用*版本（默认 `dev`，可用 `set_version("v1.2.3")` 覆盖——Rust 没有 Go 的 `-ldflags -X` 等价机制；xyz 库自身版本另行报告于 `X-XYZ-Version`/`_meta.xyz.sdk_version`，xyz-spec §11.6/§12.8）。
 
-**HTTP**（axum）：路由即 `HTTPHints { method, path }`（`{name}` 为路径参数，绑定到 `http = "path"` 的字段）；未标注 `http:` 的字段默认从查询串绑定，JSON body 合并为入参基底；支持方法 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS（其余在注册期报错）；状态码由错误分类映射（400/401/403/404/409/499/500/503），错误响应 `{"error":"..."}`；`GET /openapi.json` 输出由同一 `InputSchema` 生成的 OpenAPI 3 文档（含同源的响应 schema）；`GET /healthz` 探活、gzip 自动压缩。未声明路由的命令不会出现在 REST 里。
+输出格式：`--format auto|text|json|jsonl|markdown`（`--json` 是 `json` 的别名）——`auto` 为默认，渲染时按输出目标是否 TTY 解析（交互 → `text`，管道/重定向 → `jsonl`；两半可用 `Config.FormatInteractive`/`FormatPiped` 配置，测试/嵌入可经 `cli::Options { interactive: Some(..) }` 强制裁定）。优先级：裸 `--format`/`--json`（未被命令自有 flag 遮蔽时）> `--xyz.format` > `CliHints.format` > `Config.Format` > `auto`。机器格式（`json`/`jsonl`）下命令错误以 §8.6 错误体写入 stderr。
 
-**MCP**（官方 Rust SDK rmcp）：命令即工具，`tools/list` 直接下发派生宏生成的 inputSchema 与 **outputSchema**；成功返回双份内容——`structuredContent`（裸 JSON）+ `textContent`（CLI 同款文本）；失败返回 `isError:true` + 分类消息。支持的规范版本：`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新为无握手 `server/discover` 世代），`mcp http --versions 2025-06-18,2026-07-28` 可限定；内建约束：streamable HTTP 服务 2026-07-28 需 `--stateless`（SEP-2567），且 SDK 的 streamable-HTTP 服务默认只放行 loopback `Host` 头（防 DNS rebinding）。`mcp sse` 会以清晰错误应答并退出 2——见[与 Go 版差异](#与-go-版差异)。
+**HTTP**（axum）：路由即 `HTTPHints { method, path }`（`{name}` 为路径参数，绑定到 `http = "path"` 的字段）；未标注 `http:` 的字段默认从查询串绑定，JSON body 合并为入参基底；支持方法 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS（其余在注册期报错）；状态码由错误分类映射（400/401/403/404/409/499/500/503），错误体是三通道共享的 §8.6 形态（`{"error":"...","kind":"...","code":"...","detail":{...}}`——平铺 `error` 保持字节兼容；显式 `with_status` 覆盖 Kind 推导；未匹配路由返回本地化 JSON 404）；逐请求界面语言取自 `Accept-Language`（按 q 择优，`zh*`→zh-CN、`en*`→en，handler 可经 `language_from_ctx` 读取，spec §11.7）；每个响应携带服务器上下文头（`X-App-Name`、`X-App-Version`、`X-XYZ-Version`，每路由的 `X-XYZ-Command`/`X-XYZ-Duration-Ms`）以及自定义静态头（`--xyz.header k=v`；`--xyz.no-server-headers` 可关掉自动头）；`GET /openapi.json` 输出由同一 `InputSchema` 生成的 OpenAPI 3 文档（含同源的响应 schema）；`GET /healthz` 探活、gzip 自动压缩。未声明路由的命令不会出现在 REST 里。
+
+**MCP**（官方 Rust SDK rmcp）：命令即工具，`tools/list` 直接下发派生宏生成的 inputSchema 与 **outputSchema**；成功返回双份内容——`structuredContent`（裸 JSON）+ `textContent`（CLI 同款文本）；失败返回 `isError:true` + 分类消息。支持的规范版本：`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新为无握手 `server/discover` 世代），`mcp http --versions 2025-06-18,2026-07-28` 可限定；每个结果携带 `_meta.xyz` 服务器上下文——`app_name`/`app_version`/`sdk_version`/`command`/`duration_ms`（配置了头才有 `headers`），失败时并有 `error` 子对象（`kind`/`code`/`detail`）——`serverInfo` 报告的是**应用**身份（basename / 构建注入版本，可用 `Config.name`/`Config.version` 覆盖；spec §12.6/§12.8）。内建约束：streamable HTTP 服务 2026-07-28 需 `--stateless`（SEP-2567），且 SDK 的 streamable-HTTP 服务默认只放行 loopback `Host` 头（防 DNS rebinding）。`mcp sse` 会以清晰错误应答并退出 2——见[与 Go 版差异](#与-go-版差异)。
 
 一条更完整的真实命令——属性、三层默认、错误分类、命名标量、`Vec<u8>`、header/env 注入都在一个定义里（取自 [examples/example/src/main.rs](examples/example/src/main.rs)）：
 
@@ -379,6 +391,8 @@ let srv = xyz_rust::mcp::server(&reg, xyz_rust::mcp::Options {
 }, ctx)?;
 let router = xyz_rust::httpapi::router(&reg, ctx)?;    // 整表路由（自带 /healthz 与 /openapi.json）
 let one = xyz_rust::httpapi::handler_for(entry);       // 单条命令挂任意 axum Router（entry: Arc<Entry>）
+let env = xyz_rust::env();                             // §14 item 7：{ language, interactive, no_color }
+let lang = xyz_rust::language_from_ctx(ctx);           // 逐请求语言（§11.7）
 let mut app = xyz_rust::cli::App::new_with_options(&reg, xyz_rust::cli::Options::default())?;
 // app.set_output(Some(out_writer), Some(err_writer)); // 重定向输出流
 app.use_mw(Box::new(mw));                              // Execute 中间件：改入参、短路、包装 next()
@@ -397,7 +411,7 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 2. **serde 进核心**：Rust std 无 JSON，核心（spec / registry / errors / cli / logx / 根）除 serde + serde_json（「缺位标准库」）外零第三方依赖；chrono 同为核心依赖（时间类型）。`httpapi` 基于 axum（Rust 生态事实标准 HTTP 栈，官方 rmcp 的 streamable-HTTP 示例同栈），`mcp` 基于官方 Rust SDK `rmcp`（钉定 `=3.1.4`）——唯一另一边直接第三方依赖树。`http` 与 `mcp` 共享 tokio+axum 依赖簇（内部 feature `http-stack`）。
 3. **无反射**：Go 侧靠 struct tag 反射在运行时做的事，Rust 全部由派生宏编译期生成。属性词汇 `#[xyz(desc="...", name="w", required, secret, skip, validate="min=2,email", default="18", enum="a,b", cli="positional"/"shorthand=a,env=X"/"hidden"/"-", http="query|path|header|form|body", http_name="X-Key")]` 与 Go 的 tag 逐一对应，另支持 serde `rename` 回退与 `rename_all`；命名标量 newtype 用 `#[derive(XyzField)]`；结果 struct 用 `#[derive(Serialize, XyzOutput)]`（wire 名走 serde 惯例），也可不 derive——`XyzArgs` 入参 struct 自动获得 `XyzSchema`。
 4. **Handler 形态**：`fn(handler(_: &Ctx, _: &Args) -> Result<Resp, E>)`，`E: std::error::Error`（错误链上的分类被保留），`R: Serialize`。`define("name", h)` 全类型推断，无 Go 的 `Define[T,R]` 显式泛型。
-5. **结果渲染**：struct 与 map 同形——都先经 serde_json 序列化成 `Value`，`preserve_order` 保留声明序（Go 的 map 按键排序）；`Vec<u8>` 作为结果类型的输出 schema 是数组形（输入侧仍是 string）；`std::time::Duration` 负值不支持（Rust 语义）；oneof 对 struct 无 `%v` 形态。
+5. **结果渲染**：struct 与 map 同形——都先经 serde_json 序列化成 `Value`，`preserve_order` 保留声明序（Go 的 map 按键排序）；`Vec<u8>` 作为结果类型的输出 schema 是数组形（输入侧仍是 string）；`std::time::Duration` 负值不支持（Rust 语义）；oneof 对 struct 无 `%v` 形态；`--format markdown` 下 struct 与 map 序列化后同形，统一用 `| Field | Value |` 表头（Go 的 map 用 `| Key | Value |`）。
 6. **版本注入**：发布期调用 `set_version("v1.2.3")`——Rust 没有 `-ldflags -X` 注入，默认*应用*版本为 `dev`（xyz-spec §12.6）；库自身版本（`version::SDK_VERSION` = crate 版本）另行报告于 `X-XYZ-Version` 与 `_meta.xyz.sdk_version`。
 7. **HTTP 语义**：Gzip 用 `tower-http`（任意体积响应都压缩，且完整处理 `Accept-Encoding` 的 q 值；Go 只查头）；每请求超时经 `TimeoutLayer` 应答 **408**（而非 504）；请求级取消——客户端断开不打断 handler 执行；标准头超时未配置（非零 `Config.timeout` 是唯一超时层）。
 8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）。

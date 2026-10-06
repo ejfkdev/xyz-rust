@@ -109,3 +109,7 @@ app.use_mw(Box::new(move |_ctx, ec: &ExecContext, args, next| {
 - **MCP 底层可扩展**：`mcp::handler::build` 返回实现了 rmcp
   `ServerHandler` 的结构，额外方法（prompts 等）可包一层代理实现后照常
   `ServiceExt::serve(...)`。
+- **环境上下文随手可取**：`xyz_rust::{env, language, interactive, no_color}`
+  给中间件、自定义输出回调与宿主程序查询已解析的环境（界面语言 / 是否
+  交互式 TTY / 颜色是否被抑制；spec §14 item 7）；HTTP 请求内还可用
+  `language_from_ctx(ctx)` 读逐请求语言（§11.7）。

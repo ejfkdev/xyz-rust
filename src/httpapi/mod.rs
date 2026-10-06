@@ -81,8 +81,25 @@ pub(crate) fn router_with(
     }
     r = r
         .route("/healthz", get(healthz))
-        .route("/openapi.json", get(openapi::openapi_handler(reg)));
+        .route("/openapi.json", get(openapi::openapi_handler(reg)))
+        // 未匹配路由的统一 404（对齐 Go：{"error": <本地化 not found>}，
+        // 遵循 §11.7 的逐请求语言）。
+        .fallback(missing_route);
     Ok(r)
+}
+
+/// 未匹配路由的 404：JSON 错误体 + 请求语言本地化。
+async fn missing_route(req: Request) -> Response {
+    let lang = req
+        .headers()
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(crate::lang::parse_accept_language);
+    let msg = match lang {
+        Some(l) => crate::lang::t_lang(l, "http.err_not_found"),
+        None => crate::lang::t("http.err_not_found"),
+    };
+    write_error(StatusCode::NOT_FOUND, &msg)
 }
 
 fn method_router<H, T>(method: &str, h: H) -> errors::Result<axum::routing::MethodRouter>

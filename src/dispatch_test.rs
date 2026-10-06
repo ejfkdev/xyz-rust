@@ -583,3 +583,30 @@ fn four_mode_words_pairwise_distinct() {
     };
     assert_eq!(run_config(&test_reg(&["a.b"]), vec![], cfg2), 2);
 }
+
+#[test]
+fn mode_help_texts_cover_modes() {
+    let w = test_words();
+    let serve = crate::dispatch::mode_help_text(crate::dispatch::ModeKind::Serve, &w);
+    assert!(serve.contains("listen address"), "{serve}");
+    assert!(serve.contains("at /mcp"), "{serve}");
+    let http = crate::dispatch::mode_help_text(crate::dispatch::ModeKind::Http, &w);
+    assert!(http.contains("no /mcp endpoint"), "{http}");
+    let mcp = crate::dispatch::mode_help_text(crate::dispatch::ModeKind::Mcp, &w);
+    assert!(mcp.contains("stdio|http"), "{mcp}"); // Rust 官方 SDK 无 SSE
+    let help = crate::dispatch::mode_help_text(crate::dispatch::ModeKind::Help, &w);
+    assert!(
+        help.contains("detailed help") || help.contains("详细帮助"),
+        "{help}"
+    );
+    // 自定义词面出现在文本里（{0} 插值）。
+    let w2 = crate::dispatch::Words {
+        serve: "httpd".to_string(),
+        http: "rest".to_string(),
+        mcp: "protocol".to_string(),
+        help: "assist".to_string(),
+    };
+    assert!(
+        crate::dispatch::mode_help_text(crate::dispatch::ModeKind::Serve, &w2).contains("httpd")
+    );
+}
