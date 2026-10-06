@@ -2,6 +2,8 @@
 
 > 语言 / Language: [English](README.md) · **中文（当前页）**
 
+[![crates.io](https://img.shields.io/crates/v/xyz-rust.svg?style=flat)](https://crates.io/crates/xyz-rust)
+[![docs.rs](https://img.shields.io/docsrs/xyz-rust?style=flat)](https://docs.rs/xyz-rust)
 [![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024%E2%80%932026--07--28-0764e0?style=flat)](https://modelcontextprotocol.io/specification/2026-07-28)
 [![Dependencies](https://img.shields.io/badge/核心-std%2Bserde%2Fchrono-2ea44f?style=flat)](#依赖原则与体积)
