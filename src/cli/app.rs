@@ -122,6 +122,20 @@ impl App {
 
     /// 带前端选项的构建；None 选项保持默认。
     pub fn new_with_options(reg: &Registry, opts: Options) -> errors::Result<App> {
+        // 构建期校验代码级格式配置（对齐 Go NewWithOptions）：非法值让 CLI
+        // 构建失败（run_context 打印并 exit 2），而不是静默兜底。
+        for v in [
+            opts.format.as_deref().unwrap_or(""),
+            opts.format_interactive.as_deref().unwrap_or(""),
+            opts.format_piped.as_deref().unwrap_or(""),
+        ] {
+            if Format::parse(v).is_none() {
+                return Err(errors::Error::new(
+                    errors::Kind::Internal,
+                    format!("cli: invalid format {v:?} (want auto|text|json|jsonl|markdown)"),
+                ));
+            }
+        }
         let mut a = App::new(reg)?;
         if let Some(o) = opts.out {
             a.out = Arc::new(Mutex::new(o));
@@ -278,12 +292,14 @@ impl App {
     /// 非法值在调用方用法错误退出；层 3/4 的非法值宽松忽略（视同未设置）。
     pub(crate) fn resolve_format(&self, bare: Option<&str>, entry: Option<&Entry>) -> Format {
         let iv = self.interactive();
-        let resolved = |s: &str| {
-            Format::parse(s).unwrap_or(Format::Auto).resolve(
-                iv,
-                &self.format_interactive,
-                &self.format_piped,
-            )
+        let resolved = |s: &str| match Format::parse(s) {
+            Some(Format::Auto) => {
+                Format::Auto.resolve(iv, &self.format_interactive, &self.format_piped)
+            }
+            Some(f) => f,
+            // 非法代码配置值：按 Go 渲染 default 语义走 text（纵深兜底；
+            // 命令行两层非法在调用方与 builtins 已分别拦下）。
+            None => Format::Text,
         };
         if let Some(b) = bare {
             return resolved(b);
@@ -291,13 +307,14 @@ impl App {
         if self.format_from_flag {
             return resolved(&self.default_format);
         }
+        // 层 3/4：非空即采用（即使解析失败也停止下落，与 Go resolveFormat
+        // 的"读到值即停"一致，失败值渲染时落 text）。
         if let Some(e) = entry
             && !e.cli.format.is_empty()
-            && Format::parse(&e.cli.format).is_some()
         {
             return resolved(&e.cli.format);
         }
-        if !self.default_format.is_empty() && Format::parse(&self.default_format).is_some() {
+        if !self.default_format.is_empty() {
             return resolved(&self.default_format);
         }
         Format::Auto.resolve(iv, &self.format_interactive, &self.format_piped)

@@ -806,3 +806,141 @@ fn ctx_language_and_env_api() {
     zh.cancel();
     assert!(zh.cancelled() && ctx.cancelled());
 }
+
+#[test]
+fn format_tier_interactions_and_auto_errors() {
+    use crate::Ctx;
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct LArgs {
+        #[xyz(desc = "n")]
+        n: i64,
+    }
+    fn list(_: &Ctx, _: &LArgs) -> crate::errors::Result<Vec<i64>> {
+        Ok(vec![1, 2])
+    }
+    fn hint_bad(_: &Ctx, _: &LArgs) -> crate::errors::Result<String> {
+        Ok("S".to_string())
+    }
+    fn boom(_: &Ctx, _: &LArgs) -> crate::errors::Result<String> {
+        Err(crate::errors::Error::new(
+            crate::errors::Kind::NotFound,
+            "gone",
+        ))
+    }
+    let reg = Registry::new();
+    Command::new("b.list", list).register(&reg).unwrap();
+    Command::new("b.bad", hint_bad)
+        .cli(crate::spec::command::CliHints {
+            format: "bogus".into(), // 非法 hint：宽松忽略、落下层
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    Command::new("b.boom", boom).register(&reg).unwrap();
+
+    let run_with = |opts: Options, args: &[&str]| -> (i32, String, String) {
+        let out = Buf::default();
+        let err = Buf::default();
+        let mut a = App::new_with_options(
+            &reg,
+            Options {
+                out: Some(Box::new(out.clone())),
+                err_out: Some(Box::new(err.clone())),
+                ..opts
+            },
+        )
+        .unwrap();
+        let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let code = a.run(&argv);
+        (code, out.text(), err.text())
+    };
+
+    // 显式 bare --format auto 也走 TTY 解析（两半）。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(true),
+            ..Default::default()
+        },
+        &["b", "list", "--n", "1", "--format", "auto"],
+    );
+    assert_eq!(out, "1\n2\n"); // text
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(false),
+            format_interactive: Some("markdown".into()),
+            ..Default::default()
+        },
+        &["b", "list", "--n", "1", "--format", "auto"],
+    );
+    assert_eq!(out, "1\n2\n"); // auto→piped 默认 jsonl（数字形态与 text 同行）
+
+    // 层 1 > 层 2：裸 --format 压过 --xyz.format（命令行全局）。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(true),
+            format: Some("jsonl".into()),
+            format_from_flag: true,
+            ..Default::default()
+        },
+        &["b", "list", "--n", "1", "--format", "json"],
+    );
+    assert!(out.trim_start().starts_with('['), "{out}"); // pretty JSON 数组
+
+    // 层 2 > 层 3：--xyz.format（命令行）压过逐命令 hint（jsonl 输出带引号）。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(true),
+            format: Some("jsonl".into()),
+            format_from_flag: true,
+            ..Default::default()
+        },
+        &["b", "bad", "--n", "1"],
+    );
+    assert_eq!(out, "\"S\"\n");
+
+    // 层 3 非法值：读到值即停，渲染落 text（对齐 Go resolveFormat/default）。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(false),
+            ..Default::default()
+        },
+        &["b", "bad", "--n", "1"],
+    );
+    assert_eq!(out, "S\n");
+
+    // 层 4 非法（代码配置）→ 构建期报错 exit 2（对齐 Go NewWithOptions）。
+    let code = crate::cli::run_context(
+        &Ctx::new(),
+        &reg,
+        &[
+            "b".to_string(),
+            "list".to_string(),
+            "--n".to_string(),
+            "1".to_string(),
+        ],
+        Options {
+            interactive: Some(false),
+            format: Some("bogus".into()),
+            ..Default::default()
+        },
+    );
+    assert_eq!(code, 2);
+
+    // auto→jsonl 下命令错误：stderr 是紧凑单行 §8.6 体。
+    let (code, _o, err) = run_with(
+        Options {
+            interactive: Some(false),
+            ..Default::default()
+        },
+        &["b", "boom", "--n", "1"],
+    );
+    assert_eq!(code, 1);
+    let trimmed = err.trim();
+    assert!(trimmed.starts_with('{'), "{err}");
+    assert!(!trimmed.contains('\n'), "compact single line: {err}");
+    let v: serde_json::Value = serde_json::from_str(trimmed).unwrap();
+    assert_eq!(v["kind"], "not_found");
+}

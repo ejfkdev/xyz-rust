@@ -373,6 +373,8 @@ pub fn parse_accept_language(header: &str) -> Option<XyzLang> {
             }
             None => (part, 1.0f64),
         };
+        // 标签大小写不敏感（RFC 惯例；对齐 Go 的 ToLower 匹配）。
+        let tag = tag.trim().to_ascii_lowercase();
         let lang = if tag.starts_with("zh") {
             Some(XyzLang::ZhCn)
         } else if tag.starts_with("en") {
@@ -436,5 +438,31 @@ mod tests {
             "serve mode was disabled (Config.Capabilities.NoHTTP)"
         );
         set(XyzLang::En, None);
+    }
+}
+
+#[cfg(test)]
+mod accept_language_tests {
+    use super::*;
+
+    #[test]
+    fn accept_language_edges() {
+        // 大小写不敏感（对齐 Go ToLower 匹配）。
+        assert_eq!(parse_accept_language("ZH-CN"), Some(XyzLang::ZhCn));
+        assert_eq!(parse_accept_language("En-US,en;q=0.9"), Some(XyzLang::En));
+        // 空白与 q 值。
+        assert_eq!(
+            parse_accept_language(" zh-CN ; q=0.8 , en ; q=0.9 "),
+            Some(XyzLang::En)
+        );
+        // 坏 q 视为缺省 1.0（对齐 Go：解析失败保持默认）。
+        assert_eq!(parse_accept_language("zh;q=abc,en"), Some(XyzLang::ZhCn));
+        // q=0 仍参与择优（与 Go 行为一致；锁一致而非 RFC 严格性）。
+        assert_eq!(parse_accept_language("zh;q=0,en;q=0.5"), Some(XyzLang::En));
+        assert_eq!(parse_accept_language("zh;q=0"), Some(XyzLang::ZhCn));
+        // 通配与空串 → 无受支持标签。
+        assert_eq!(parse_accept_language("*"), None);
+        assert_eq!(parse_accept_language(""), None);
+        assert_eq!(parse_accept_language("fr-FR,de;q=0.8"), None);
     }
 }

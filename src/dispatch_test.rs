@@ -279,6 +279,14 @@ fn lang_resolution_and_catalog() {
     .unwrap();
     let out2 = String::from_utf8(buf2).unwrap();
     assert!(out2.contains("用法（模式由程序自动判断"), "{out2}");
+    // v0.4.4：四模式行（http/help 为新增）随语言目录输出。
+    assert!(out.contains("no /mcp"), "{out}");
+    assert!(
+        out.contains("detailed help for a command or a mode"),
+        "{out}"
+    );
+    assert!(out2.contains("不挂 /mcp"), "{out2}");
+    assert!(out2.contains("某命令或某模式的详细帮助"), "{out2}");
     // 覆盖表
     let mut ov = std::collections::HashMap::new();
     ov.insert("overview.commands".to_string(), "Commands!:".to_string());
@@ -474,6 +482,22 @@ fn help_subcommand_family() {
             "help family: {argv:?}"
         );
     }
+    // 别名路径等价（CLI 树解析别名）。
+    #[cfg(feature = "cli")]
+    {
+        let reg2 = Registry::new();
+        Command::new("user.add", th)
+            .cli(crate::spec::command::CliHints {
+                aliases: vec!["ua".into()],
+                ..Default::default()
+            })
+            .register(&reg2)
+            .unwrap();
+        assert_eq!(
+            run_config(&reg2, args(&["help", "ua"]), Config::default()),
+            0
+        );
+    }
 }
 
 #[test]
@@ -492,4 +516,70 @@ fn mode_help_does_not_start_servers() {
             "mode -h: {argv:?}"
         );
     }
+}
+
+#[test]
+fn shadowing_edges() {
+    // 单段顶层名遮蔽：注册 "serve"（无点）同样让裸词归用户命令。
+    let reg = test_reg(&["serve"]);
+    #[cfg(feature = "cli")]
+    assert_eq!(run_config(&reg, args(&["serve"]), Config::default()), 0);
+    // xyz.<词> 仍达内建（模式帮助，不启动）。
+    assert_eq!(
+        run_config(&reg, args(&["xyz.serve", "-h"]), Config::default()),
+        0
+    );
+    // help 家族与遮蔽交互：help serve → 用户命令帮助；help xyz.serve → 模式帮助。
+    #[cfg(feature = "cli")]
+    assert_eq!(
+        run_config(&reg, args(&["help", "serve"]), Config::default()),
+        0
+    );
+    assert_eq!(
+        run_config(&reg, args(&["help", "xyz.serve"]), Config::default()),
+        0
+    );
+
+    // 自定义模式词同样可被遮蔽（serve := httpd）。
+    let cfg = Config {
+        modes: ModeWords {
+            serve: "httpd".into(),
+            http: String::new(),
+            mcp: String::new(),
+            help: String::new(),
+        },
+        ..Default::default()
+    };
+    let reg2 = test_reg(&["httpd.x"]);
+    #[cfg(feature = "cli")]
+    assert_eq!(run_config(&reg2, args(&["httpd", "x"]), cfg.clone()), 0);
+    assert_eq!(
+        run_config(&reg2, args(&["xyz.httpd", "-h"]), cfg.clone()),
+        0
+    );
+}
+
+#[test]
+fn four_mode_words_pairwise_distinct() {
+    // 四词参与两两校验（spec §13.1），含 http 词。
+    let cfg = Config {
+        modes: ModeWords {
+            serve: "d".into(),
+            http: "d".into(),
+            mcp: String::new(),
+            help: String::new(),
+        },
+        ..Default::default()
+    };
+    assert_eq!(run_config(&test_reg(&["a.b"]), vec![], cfg), 2);
+    let cfg2 = Config {
+        modes: ModeWords {
+            serve: String::new(),
+            http: String::new(),
+            mcp: "h".into(),
+            help: "h".into(),
+        },
+        ..Default::default()
+    };
+    assert_eq!(run_config(&test_reg(&["a.b"]), vec![], cfg2), 2);
 }
