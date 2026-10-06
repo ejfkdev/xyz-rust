@@ -409,14 +409,16 @@ fn shadowing_modes_and_namespaced_reachability() {
     // spec §13.1：顶层段等于模式词的用户命令不再注册期报错，而是遮蔽裸词；
     // xyz.<词> 恒可达。
     let reg = test_reg(&["serve.x", "mcp.y"]);
-    // 裸 serve → 用户命令（遮蔽生效；serve.x 执行成功）。
-    assert_eq!(
-        run_config(&reg, args(&["serve", "x"]), Config::default()),
-        0
-    );
-    // 裸 mcp 仍归内建模式（mcp.y 未注册？——测试注册了；此处应遮蔽）
-    assert_eq!(run_config(&reg, args(&["mcp", "y"]), Config::default()), 0);
-    // xyz.<词> 恒命中：模式帮助（不启动服务）。
+    // 裸词让位：路由到用户命令（依赖 CLI 前端；无 cli 构建下走 stub）。
+    #[cfg(feature = "cli")]
+    {
+        assert_eq!(
+            run_config(&reg, args(&["serve", "x"]), Config::default()),
+            0
+        );
+        assert_eq!(run_config(&reg, args(&["mcp", "y"]), Config::default()), 0);
+    }
+    // xyz.<词> 恒命中：模式帮助（不启动服务，任何构建都可）。
     assert_eq!(
         run_config(&reg, args(&["xyz.serve", "-h"]), Config::default()),
         0
@@ -455,10 +457,17 @@ fn help_subcommand_family() {
         vec!["help", "serve"],
         vec!["help", "http"],
         vec!["help", "mcp"],
-        vec!["help", "user.add"],
-        vec!["help", "user", "add"],
         vec!["help", "help"],
     ] {
+        assert_eq!(
+            run_config(&reg, args(&argv), Config::default()),
+            0,
+            "help family: {argv:?}"
+        );
+    }
+    // 命令路径形态委托 CLI 的 -h；无 cli 构建下按 stub 语义（不计入断言）。
+    #[cfg(feature = "cli")]
+    for argv in [vec!["help", "user.add"], vec!["help", "user", "add"]] {
         assert_eq!(
             run_config(&reg, args(&argv), Config::default()),
             0,
