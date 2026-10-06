@@ -217,8 +217,25 @@ impl std::error::Error for Error {
 
 impl From<std::io::Error> for Error {
     fn from(e: std::io::Error) -> Self {
-        Error::new(Kind::Internal, format!("io: {e}"))
+        // 保留底层 io::Error 进 cause 链：显示文本与历史形态完全一致
+        //（"io: …"），同时让 EPIPE 之类的类型信息可被沿链检测。
+        Error::wrap_msg(Kind::Internal, e, "io")
     }
+}
+
+/// 错误链上是否为管道早关（EPIPE）：CLI 出口据此静默终止（对齐 Go
+/// 进程被 SIGPIPE 终止的 128+13=141 行为），而不是打印错误体。
+pub fn is_broken_pipe(err: &(dyn std::error::Error + 'static)) -> bool {
+    let mut cur: Option<&(dyn std::error::Error + 'static)> = Some(err);
+    while let Some(e) = cur {
+        if let Some(io) = e.downcast_ref::<std::io::Error>()
+            && io.kind() == std::io::ErrorKind::BrokenPipe
+        {
+            return true;
+        }
+        cur = e.source();
+    }
+    false
 }
 
 /// 沿错误链找到第一条带分类的错误并返回其 Kind：

@@ -268,6 +268,10 @@ impl App {
         let entry = target.and_then(|n| n.entry.clone());
         let format = self.resolve_format(bare.as_deref(), entry.as_deref());
         if let Err(e) = self.execute(ctx, self.root.clone(), &filtered, format, &bin) {
+            // 下游早关管道（| head 等）：静默按 Go 的 SIGPIPE 惯例退出。
+            if errors::is_broken_pipe(&e) {
+                return 141;
+            }
             self.render_error(&e, format);
             return exit_code_of(&e);
         }

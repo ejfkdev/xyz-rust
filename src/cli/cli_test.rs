@@ -944,3 +944,54 @@ fn format_tier_interactions_and_auto_errors() {
     let v: serde_json::Value = serde_json::from_str(trimmed).unwrap();
     assert_eq!(v["kind"], "not_found");
 }
+
+#[test]
+fn broken_pipe_exits_quietly() {
+    use crate::Ctx;
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    // 永远报 BrokenPipe 的输出目标（模拟下游 `| head` 早关）。
+    struct PipeErr;
+    impl std::io::Write for PipeErr {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::BrokenPipe,
+                "broken pipe",
+            ))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct PArgs {
+        #[xyz(desc = "n")]
+        n: String,
+    }
+    fn lines(_: &Ctx, _: &PArgs) -> crate::errors::Result<Vec<String>> {
+        Ok(vec!["a".into(), "b".into()])
+    }
+    let reg = Registry::new();
+    Command::new("p.lines", lines).register(&reg).unwrap();
+    let errbuf = Buf::default();
+    let mut app = App::new_with_options(
+        &reg,
+        Options {
+            out: Some(Box::new(PipeErr)),
+            err_out: Some(Box::new(errbuf.clone())),
+            interactive: Some(true),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let argv: Vec<String> = ["p", "lines", "--n", "x"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let code = app.run(&argv);
+    // 静默 141（对齐 Go 的 SIGPIPE 惯例），stderr 不打错误体。
+    assert_eq!(code, 141, "stderr: {}", errbuf.text());
+    assert!(errbuf.text().is_empty(), "stderr: {}", errbuf.text());
+}

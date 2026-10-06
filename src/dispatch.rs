@@ -12,8 +12,10 @@
 //	<app> serve [--addr ...]  -> HTTP 前端（REST + /openapi.json + /mcp）
 //	<app>（无参数）| help     -> 总览
 //
-// 模式关键词默认为 serve/mcp/help 且是保留的顶层名字；两者都跟随
-// run_config 里的 Modes 配置，可重命名。
+// 模式关键词默认为 serve/http/mcp/help，皆可在 Modes 配置里重命名；顶层
+// 段撞词只是遮蔽让位（spec §13.1），不再是保留名。
+
+use std::io::Write as _;
 
 use crate::config::Config;
 use crate::ctx::Ctx;
@@ -120,7 +122,12 @@ fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool
         }
         if a == "-v" || a == "--version" {
             let bin = crate::cli::app::bin_name();
-            println!("{bin} version {}", crate::version::version());
+            // 稳健写入：下游早关管道不 panic（对齐 Go 的 SIGPIPE 静默）。
+            let _ = writeln!(
+                std::io::stdout(),
+                "{bin} version {}",
+                crate::version::version()
+            );
             return (0, true);
         }
     }
@@ -448,7 +455,8 @@ pub(crate) fn mode_help_text(kind: ModeKind, w: &Words) -> String {
 
 /// 打印某个模式的帮助（spec §10.4/§13.2），不起服务。
 fn print_mode_help(kind: ModeKind, w: &Words) -> i32 {
-    println!("{}", mode_help_text(kind, w));
+    // 稳健写入：早关管道静默（同 -v）。
+    let _ = writeln!(std::io::stdout(), "{}", mode_help_text(kind, w));
     0
 }
 
