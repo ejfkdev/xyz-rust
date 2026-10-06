@@ -1,13 +1,13 @@
 # Conformance — xyz-rust
 
-Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.3.0**.
+Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.4.2**.
 
 Status: **conformant (baseline anchor)** — xyz-rust is one of the two
 reference implementations the specification was written from.
 
 Deviations register: see
 [deviations.md](https://github.com/ejfkdev/xyz-spec/blob/main/deviations.md),
-entries `D-rust-01` … `D-rust-10`.
+entries `D-rust-01` … `D-rust-13`.
 
 ## Checklist
 
@@ -16,7 +16,7 @@ following evidence:
 
 | Evidence | Covers |
 |---|---|
-| `cargo test -p xyz-rust --lib` (73 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.42 pipeline, taxonomy, rendering, dispatcher semantics |
+| `cargo test -p xyz-rust --lib` (104 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.88 | A.38–A.39 trim invariants |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
@@ -41,6 +41,45 @@ and the language catalog of §15.5 (`lang::tests`,
 §10.4 (`cli::cli_test::channel_skip_and_help_types`,
 `cli::cli_test::daemon_style_command`, `dispatch_test::try_run_composability`,
 `dispatch_test::channel_defaults_flag`).
+
+## v0.3.x → v0.4.2 additions
+
+The clauses landed between the v0.3.0 anchor and v0.4.2, each with the
+evidence that locks it:
+
+- **§4.5a/§6.1/§13.9 (gs needs, v0.3.1–v0.3.2)** — channel skips, daemon
+  marker, `--default`, bare-flag passthrough, `try_run`:
+  `cli::cli_test::channel_skip_and_help_types`,
+  `cli::cli_test::daemon_style_command`, `dispatch_test::try_run_composability`,
+  `dispatch_test::channel_defaults_flag`.
+- **§12.4a MCP tool-name override (v0.3.3)** — `MCPHints.name`, grammar-checked
+  at registration: `mcp::mcp_test::mcp_name_override`.
+- **§4.7 tagged unions (v0.4.0)** — adjacent-tag enums → `oneOf` with `const`
+  discriminators, exactly-one-branch decode, per-frontend skip policy:
+  `spec::spec_test::tagged_union_schema_and_decode`,
+  `spec::spec_test::tagged_union_variant_rename_matches_serde`,
+  `cli::cli_test::union_field_degrades_not_fatals`.
+- **§12.7 content-block results (v0.4.0)** — reserved `content` envelope,
+  MCP verbatim blocks, CLI temp-file projection:
+  `blocks::tests`, `mcp::mcp_test::block_envelope_passes_through`,
+  `cli::cli_test::block_envelope_spills_binary_to_files`.
+- **§8.5/§8.6 rich errors (v0.4.2)** — `with_code/with_detail/with_status`
+  builders, shared error body on HTTP/CLI-machine/MCP:
+  `errors` unit tests, `httpapi::httpapi_test::rich_error_body_and_status_override`,
+  `mcp::mcp_test::result_meta_shape`.
+- **§10.7 `--format` (v0.4.2)** — text/json/jsonl/markdown, `--json` alias,
+  bare-flag yield rule, `--xyz.format`:
+  `cli::format::tests`, `cli::cli_test::format_dispatch_and_conflict_yield`,
+  `cli::cli_test::format_flag_yields_to_command_field`.
+- **§11.6 server-context headers (v0.4.2)** —
+  `httpapi::httpapi_test::server_context_headers_on_all_responses`; app
+  identity vs SDK version split is in `version` module docs and README §差异.
+- **§12.6/§12.8 MCP identity & result `_meta.xyz` (v0.4.2)** —
+  `mcp::mcp_test::result_meta_shape`.
+
+Known remaining gaps are in the deviations register: D-rust-12 closed by
+this release (MCPHints.name), D-go-01 (tagged unions in Go) is the Go
+side's open item.
 
 ## Deviations
 

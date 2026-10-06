@@ -90,6 +90,10 @@ pub struct HTTPFieldHint {
 /// MCPHints 是 MCP 前端的命令级配置。
 #[derive(Debug, Clone, Default)]
 pub struct MCPHints {
+    /// MCP 工具名覆写（spec §12.4a）：空=沿用点分注册名；非空则该名字是
+    /// tools/list 通告与 tools/call 接受的唯一名字（CLI/HTTP 命名不动，
+    /// 两通道前缀可各自独立）。须满足 §3.1 名字文法。
+    pub name: String,
     /// 形如 "read"、"write"、"destructive"、"title:创建用户"。
     pub annotations: Vec<String>,
     /// 从 MCP 通道整体移除该命令：不成为工具。
@@ -185,6 +189,18 @@ where
         check_entry_name(&self.name).map_err(|e| {
             errors::Error::new(e.kind(), format!("spec: command {:?}: {}", self.name, e))
         })?;
+        // MCP 工具名覆写（spec §12.4a）同样须满足 §3.1 文法。
+        if !self.mcp.name.is_empty() {
+            check_entry_name(&self.mcp.name).map_err(|e| {
+                errors::Error::new(
+                    e.kind(),
+                    format!(
+                        "spec: command {:?}: mcp name override {:?}: {}",
+                        self.name, self.mcp.name, e
+                    ),
+                )
+            })?;
+        }
         // xyz_spec 的递归护栏用 panic 表达；注册期把它捕获成错误。
         let meta = match std::panic::catch_unwind(T::xyz_meta) {
             Ok(Ok(meta)) => meta.to_vec(),
@@ -256,9 +272,12 @@ where
                     Err(e) => {
                         // 沿用户错误链保留既有分类（Go：handler 的错误类型
                         // 直接参与 classify）；未分类才兜底 internal。
+                        // §8.5：包装壳同时继承链上富化层（Go 直接透传
+                        // CodedError 的等价物），code/detail/status 不丢。
+                        let rich = errors::rich_fields(&e);
                         return Err(match errors::classify(&e) {
-                            Some(kind) => errors::Error::wrap(kind, e),
-                            None => errors::Error::upgrade(e),
+                            Some(kind) => errors::Error::wrap(kind, e).inherit_values(rich),
+                            None => errors::Error::upgrade(e).inherit_values(rich),
                         });
                     }
                 };

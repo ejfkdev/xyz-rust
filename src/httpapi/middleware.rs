@@ -143,6 +143,53 @@ pub fn cors_mw(
 
 /// 组装完整中间件链（由外到内）：CORS → Bearer → Gzip → 路由。
 /// tower 的 layer 语义是「先 add 的靠内」，所以按 内→外 顺序加。
+/// 服务器上下文头（spec §11.6）：X-App-Name / X-App-Version /
+/// X-XYZ-Version 三个身份头（enabled 时）+ 用户自定义静态头（始终写）。
+/// 覆盖全部路由（含 /healthz、/openapi.json 与挂载的 /mcp）；命令/耗时头
+/// 是每路由的，在 EntryHandler 里写。
+pub fn server_context_mw(
+    app_name: String,
+    app_version: String,
+    custom: Vec<(String, String)>,
+    enabled: bool,
+) -> impl Fn(
+    Request,
+    Next,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send + 'static>>
++ Clone
++ Send
++ 'static {
+    move |req: Request, next: Next| {
+        let app_name = app_name.clone();
+        let app_version = app_version.clone();
+        let custom = custom.clone();
+        Box::pin(async move {
+            let mut resp = next.run(req).await;
+            let h = resp.headers_mut();
+            if enabled {
+                for (name, value) in [
+                    ("x-app-name", app_name.as_str()),
+                    ("x-app-version", app_version.as_str()),
+                    ("x-xyz-version", crate::version::SDK_VERSION),
+                ] {
+                    if let Ok(v) = header::HeaderValue::from_str(value) {
+                        let _ = h.insert(header::HeaderName::from_static(name), v);
+                    }
+                }
+            }
+            for (k, v) in &custom {
+                if let (Ok(name), Ok(value)) = (
+                    header::HeaderName::from_bytes(k.as_bytes()),
+                    header::HeaderValue::from_str(v),
+                ) {
+                    let _ = h.insert(name, value);
+                }
+            }
+            resp
+        })
+    }
+}
+
 pub fn apply(
     router: Router,
     bearer_tokens: Vec<String>,

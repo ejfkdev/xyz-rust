@@ -60,6 +60,26 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                 merge_default_pairs(&mut cfg.channel_defaults, &v)?;
                 true
             }
+            "--xyz.format" => {
+                let v = take_value(&args, &mut i, &a)?;
+                if crate::cli::format::Format::parse(&v).is_none() {
+                    return Err(errors::Error::new(
+                        errors::Kind::Internal,
+                        format!("invalid --xyz.format {v:?} (want text|json|jsonl|markdown)"),
+                    ));
+                }
+                cfg.format = v;
+                true
+            }
+            "--xyz.header" => {
+                let v = take_value(&args, &mut i, &a)?;
+                merge_header_pairs(&mut cfg.response_headers, &v)?;
+                true
+            }
+            "--xyz.no-server-headers" => {
+                cfg.no_server_headers = true;
+                true
+            }
             "--xyz.lang" => {
                 let v = take_value(&args, &mut i, &a)?;
                 if crate::lang::XyzLang::parse(&v).is_none() {
@@ -101,6 +121,18 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                     true
                 } else if let Some(v) = a.strip_prefix("--xyz.default=") {
                     merge_default_pairs(&mut cfg.channel_defaults, v)?;
+                    true
+                } else if let Some(v) = a.strip_prefix("--xyz.format=") {
+                    if crate::cli::format::Format::parse(v).is_none() {
+                        return Err(errors::Error::new(
+                            errors::Kind::Internal,
+                            format!("invalid --xyz.format {v:?} (want text|json|jsonl|markdown)"),
+                        ));
+                    }
+                    cfg.format = v.to_string();
+                    true
+                } else if let Some(v) = a.strip_prefix("--xyz.header=") {
+                    merge_header_pairs(&mut cfg.response_headers, v)?;
                     true
                 } else if let Some(v) = a.strip_prefix("--xyz.lang=") {
                     if crate::lang::XyzLang::parse(v).is_none() {
@@ -232,6 +264,29 @@ pub fn split_versions(s: &str) -> Vec<String> {
         .filter(|p| !p.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// 解析 --xyz.header 的 k=v 对（可重复；后写覆盖先写的同名键）。
+fn merge_header_pairs(headers: &mut Vec<(String, String)>, v: &str) -> errors::Result<()> {
+    let (k, val) = v.split_once('=').ok_or_else(|| {
+        errors::Error::new(
+            errors::Kind::Internal,
+            format!("invalid --xyz.header {v:?} (want key=value)"),
+        )
+    })?;
+    let k = k.trim();
+    if k.is_empty() {
+        return Err(errors::Error::new(
+            errors::Kind::Internal,
+            "--xyz.header requires a non-empty key".to_string(),
+        ));
+    }
+    if let Some(slot) = headers.iter_mut().find(|(h, _)| h == k) {
+        slot.1 = val.to_string();
+    } else {
+        headers.push((k.to_string(), val.to_string()));
+    }
+    Ok(())
 }
 
 /// 合并逗号分隔的 token 列表并去重（代码预置在前，命令行追加在后）。

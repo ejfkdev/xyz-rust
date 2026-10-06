@@ -42,7 +42,7 @@ pub const MAX_BODY_BYTES: usize = 1 << 20;
 /// method+path 冲突是注册期错误（Go 用 recover 包 mux panic 转错误，
 /// 这里显式前置检查，行为等价）。
 pub fn router(reg: &Registry, ctx: Arc<Ctx>) -> errors::Result<Router> {
-    router_with(reg, ctx, std::collections::HashMap::new())
+    router_with(reg, ctx, std::collections::HashMap::new(), false)
 }
 
 /// 带通道级默认参数的路由器（serve --default k=v：缺席键补上）。
@@ -50,6 +50,7 @@ pub(crate) fn router_with(
     reg: &Registry,
     ctx: Arc<Ctx>,
     defaults: std::collections::HashMap<String, String>,
+    no_server_headers: bool,
 ) -> errors::Result<Router> {
     let mut r: Router = Router::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -69,7 +70,12 @@ pub(crate) fn router_with(
                 ),
             ));
         }
-        let h = handle_entry_c(e.clone(), Arc::clone(&ctx), Arc::new(defaults.clone()));
+        let h = handle_entry_c(
+            e.clone(),
+            Arc::clone(&ctx),
+            Arc::new(defaults.clone()),
+            no_server_headers,
+        );
         let mr = method_router(&e.http.method, h)?;
         r = r.route(&e.http.path, mr);
     }
@@ -113,12 +119,23 @@ pub struct EntryHandler {
     pub(crate) entry: Arc<Entry>,
     pub(crate) ctx: Arc<Ctx>,
     pub(crate) defaults: Arc<std::collections::HashMap<String, String>>,
+    /// 关闭每路由的 X-XYZ-Command/X-XYZ-Duration-Ms（§11.6 单一开关）。
+    pub(crate) no_server_headers: bool,
 }
 
 impl axum::handler::Handler<(), ()> for EntryHandler {
     type Future = std::pin::Pin<Box<dyn std::future::Future<Output = Response> + Send>>;
     fn call(self, req: Request, _state: ()) -> Self::Future {
-        Box::pin(async move { handle_request(&self.entry, &self.ctx, &self.defaults, req).await })
+        Box::pin(async move {
+            handle_request(
+                &self.entry,
+                &self.ctx,
+                &self.defaults,
+                self.no_server_headers,
+                req,
+            )
+            .await
+        })
     }
 }
 
@@ -127,6 +144,7 @@ pub fn handler_for(entry: Arc<Entry>) -> EntryHandler {
         entry,
         Arc::new(Ctx::new()),
         Arc::new(std::collections::HashMap::new()),
+        false,
     )
 }
 
@@ -135,11 +153,13 @@ fn handle_entry_c(
     entry: Arc<Entry>,
     ctx: Arc<Ctx>,
     defaults: Arc<std::collections::HashMap<String, String>>,
+    no_server_headers: bool,
 ) -> EntryHandler {
     EntryHandler {
         entry,
         ctx,
         defaults,
+        no_server_headers,
     }
 }
 
@@ -147,6 +167,7 @@ async fn handle_request(
     entry: &Arc<Entry>,
     ctx: &Arc<Ctx>,
     defaults: &std::collections::HashMap<String, String>,
+    no_server_headers: bool,
     req: Request,
 ) -> Response {
     let (parts, body) = req.into_parts();
@@ -255,20 +276,26 @@ async fn handle_request(
         }
     }
 
-    match (entry.invoke)(ctx, &m) {
+    let started = std::time::Instant::now();
+    let mut resp = match (entry.invoke)(ctx, &m) {
         Ok(out) => {
             let s = serde_json::to_string_pretty(&out).unwrap_or_else(|_| "null".to_string());
             json_response(StatusCode::OK, &s)
         }
-        Err(e) => {
-            let kind = errors::classify(&e).unwrap_or(errors::Kind::Internal);
-            write_error(
-                StatusCode::from_u16(errors::http_status(kind))
-                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-                &cause_message(&e),
-            )
+        Err(e) => write_coded_error(&e),
+    };
+    // §11.6 per-route 上下文头（身份/自定义头由 serve 的全局层写）。
+    if !no_server_headers {
+        let h = resp.headers_mut();
+        if let Ok(v) = header::HeaderValue::from_str(&entry.name) {
+            let _ = h.insert(header::HeaderName::from_static("x-xyz-command"), v);
+        }
+        let dur = started.elapsed().as_millis().to_string();
+        if let Ok(v) = header::HeaderValue::from_str(&dur) {
+            let _ = h.insert(header::HeaderName::from_static("x-xyz-duration-ms"), v);
         }
     }
+    resp
 }
 
 /// httpName 计算线上名：http_name 覆盖 > JSON 名 > Rust 字段名。
@@ -358,11 +385,17 @@ fn hex_val(b: Option<&u8>) -> Option<u8> {
     }
 }
 
-fn cause_message(e: &errors::Error) -> String {
-    match e.cause() {
-        Some(c) => c.to_string(),
-        None => e.to_string(),
+/// spec §8.6：HTTP 错误体 = 共享错误对象（紧凑 JSON），状态码遵循
+/// §8.5 的显式 status 覆盖，否则按 Kind 推导。
+fn write_coded_error(e: &errors::Error) -> Response {
+    let status =
+        StatusCode::from_u16(errors::error_status(e)).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+    let mut body = errors::error_body(e);
+    if body.error.is_empty() {
+        body.error = status.canonical_reason().unwrap_or("error").to_string();
     }
+    let s = serde_json::to_string(&body).unwrap_or_else(|_| "{\"error\":\"\"}".to_string());
+    json_response(status, &s)
 }
 
 fn write_error(status: StatusCode, msg: &str) -> Response {
@@ -411,10 +444,10 @@ async fn collect_body(body: axum::body::Body, cap: usize) -> Vec<u8> {
 /// `:8080` 简写 → `0.0.0.0:8080`（Go net.Listen 惯例；tokio 的
 /// ToSocketAddrs 不接受略主机形态）。IPv6 缩写（"::"）原样保留。
 pub(crate) fn normalize_addr(addr: &str) -> String {
-    if let Some(rest) = addr.strip_prefix(':') {
-        if !rest.contains(':') {
-            return format!("0.0.0.0:{rest}");
-        }
+    if let Some(rest) = addr.strip_prefix(':')
+        && !rest.contains(':')
+    {
+        return format!("0.0.0.0:{rest}");
     }
     addr.to_string()
 }
@@ -422,7 +455,12 @@ pub(crate) fn normalize_addr(addr: &str) -> String {
 pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
     let cfg = crate::builtins::parse_serve_args(args, cfg);
     let sctx = Arc::new(ctx.clone());
-    let mut router = match router_with(reg, Arc::clone(&sctx), cfg.channel_defaults.clone()) {
+    let mut router = match router_with(
+        reg,
+        Arc::clone(&sctx),
+        cfg.channel_defaults.clone(),
+        cfg.no_server_headers,
+    ) {
         Ok(r) => r,
         Err(e) => {
             crate::logx::errorf(format_args!("{e}"));
@@ -459,6 +497,13 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
         cfg.cors_origins.clone(),
         cfg.timeout,
     );
+    // §11.6 服务器上下文头：最外层（含 401/预检等一切响应）。
+    let router = router.layer(axum::middleware::from_fn(middleware::server_context_mw(
+        cfg.resolved_name(),
+        cfg.resolved_version(),
+        cfg.response_headers.clone(),
+        !cfg.no_server_headers,
+    )));
 
     let tls_on = !cfg.cert_file.is_empty() || !cfg.key_file.is_empty();
     if tls_on && (cfg.cert_file.is_empty() || cfg.key_file.is_empty()) {
@@ -482,13 +527,14 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
         }
     };
     rt.block_on(async move {
-        let listener = match tokio::net::TcpListener::bind(&crate::httpapi::normalize_addr(&cfg.addr)).await {
-            Ok(l) => l,
-            Err(e) => {
-                crate::logx::errorf(format_args!("{e}"));
-                return 1;
-            }
-        };
+        let listener =
+            match tokio::net::TcpListener::bind(&crate::httpapi::normalize_addr(&cfg.addr)).await {
+                Ok(l) => l,
+                Err(e) => {
+                    crate::logx::errorf(format_args!("{e}"));
+                    return 1;
+                }
+            };
         let handle = axum_server::Handle::new();
         let cert_file = cfg.cert_file.clone();
         let key_file = cfg.key_file.clone();

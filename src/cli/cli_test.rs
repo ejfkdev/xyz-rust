@@ -53,6 +53,7 @@ fn run_app(reg: &Registry, args: &[&str]) -> (i32, String, String) {
         Options {
             out: Some(Box::new(out.clone())),
             err_out: Some(Box::new(err.clone())),
+            format: None,
         },
     )
     .unwrap();
@@ -519,10 +520,10 @@ fn block_envelope_spills_binary_to_files() {
 
 #[test]
 fn union_field_degrades_not_fatals() {
-    use crate::registry::Registry;
-    use crate::spec::command::Command;
-    use crate::spec::XyzField;
     use crate::Ctx;
+    use crate::registry::Registry;
+    use crate::spec::XyzField;
+    use crate::spec::command::Command;
 
     #[derive(serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
     #[serde(tag = "type")]
@@ -543,10 +544,7 @@ fn union_field_degrades_not_fatals() {
         Ok(format!(
             "{}/{}",
             in_.tag_note,
-            in_.sel
-                .as_ref()
-                .map(|_| "sel")
-                .unwrap_or("no-sel")
+            in_.sel.as_ref().map(|_| "sel").unwrap_or("no-sel")
         ))
     }
 
@@ -567,4 +565,109 @@ fn union_field_degrades_not_fatals() {
         code, 0,
         "command with union field must run (union skipped); stderr: {err}; help: {hout}; fields: {names:?}"
     );
+}
+
+#[test]
+fn format_dispatch_and_conflict_yield() {
+    use crate::Ctx;
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct FArgs {
+        #[xyz(desc = "n")]
+        n: i64,
+    }
+    fn list(_: &Ctx, _: &FArgs) -> crate::errors::Result<Vec<i64>> {
+        Ok(vec![1, 2])
+    }
+    let reg = Registry::new();
+    Command::new("f.list", list).register(&reg).unwrap();
+
+    // 无冲突命令：裸 --format jsonl 生效（数组逐元素紧凑一行）。
+    let (code, out, err) = run_app(&reg, &["f", "list", "--format", "jsonl", "--n", "1"]);
+    assert_eq!(code, 0, "err: {err}");
+    assert_eq!(out, "1\n2\n");
+
+    let (code, out, _) = run_app(&reg, &["f", "list", "--format=markdown", "--n", "1"]);
+    assert_eq!(code, 0);
+    assert_eq!(out, "- 1\n- 2\n");
+
+    // --xyz.format 的默认格式经 Options 注入（派发器同款路径在这里用手工
+    // Options 模拟）：裸标志仍是最高优先级。
+    let out_buf = Buf::default();
+    let err_buf = Buf::default();
+    let mut a = App::new_with_options(
+        &reg,
+        Options {
+            out: Some(Box::new(out_buf.clone())),
+            err_out: Some(Box::new(err_buf.clone())),
+            format: Some("json".into()),
+        },
+    )
+    .unwrap();
+    let argv: Vec<String> = ["f", "list", "--n", "1"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(a.run(&argv), 0);
+    assert!(
+        out_buf.text().trim_start().starts_with('['),
+        "{}",
+        out_buf.text()
+    );
+
+    // 非法格式：用法错误 exit 2。
+    let (code, _o, e) = run_app(&reg, &["f", "list", "--format", "bogus"]);
+    assert_eq!(code, 2);
+    assert!(e.contains("invalid output format"), "{e}");
+
+    // 机器格式下命令错误走 §8.6 错误体（stderr，非纯文本行）。
+    #[derive(xyz_rust::XyzArgs)]
+    struct BoomArgs {
+        #[xyz(desc = "n")]
+        n: i64,
+    }
+    fn boom(_: &Ctx, _: &BoomArgs) -> crate::errors::Result<String> {
+        Err(
+            crate::errors::Error::new(crate::errors::Kind::NotFound, "gone")
+                .with_code("GONE")
+                .with_detail("id", serde_json::json!(7)),
+        )
+    }
+    Command::new("f.boom", boom).register(&reg).unwrap();
+    let (code, _o, err) = run_app(&reg, &["f", "boom", "--format", "json", "--n", "1"]);
+    assert_eq!(code, 1);
+    let v: serde_json::Value = serde_json::from_str(err.trim()).unwrap();
+    assert_eq!(v["error"], "gone");
+    assert_eq!(v["kind"], "not_found");
+    assert_eq!(v["code"], "GONE");
+    assert_eq!(v["detail"]["id"], 7);
+    // text 格式仍是人类可读一行。
+    let (code, _o, err) = run_app(&reg, &["f", "boom", "--n", "1"]);
+    assert_eq!(code, 1);
+    assert!(!err.trim_start().starts_with('{'), "{err}");
+}
+
+#[test]
+fn format_flag_yields_to_command_field() {
+    use crate::Ctx;
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    // 命令自有 format 字段：裸 --format 归命令（全局格式只认 --xyz.format）。
+    #[derive(xyz_rust::XyzArgs)]
+    struct HasFormatArgs {
+        #[xyz(desc = "fmt")]
+        format: String,
+    }
+    fn echo(_: &Ctx, a: &HasFormatArgs) -> crate::errors::Result<String> {
+        Ok(a.format.clone())
+    }
+    let reg = Registry::new();
+    Command::new("g.echo", echo).register(&reg).unwrap();
+    let (code, out, err) = run_app(&reg, &["g", "echo", "--format", "json"]);
+    assert_eq!(code, 0, "err: {err}");
+    // 未让位的话会被当全局格式并吃掉参数（命令将报缺参）；这里必须原样到手。
+    assert_eq!(out.trim(), "json");
 }

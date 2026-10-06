@@ -7,6 +7,7 @@
 
 pub mod app;
 pub mod completion;
+pub mod format;
 pub mod help;
 pub mod parse;
 pub mod render;

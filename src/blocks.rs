@@ -12,17 +12,25 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 use serde_json::Value;
 
 use crate::errors;
-use crate::spec::schema::Schema;
 use crate::spec::XyzSchema;
+use crate::spec::schema::Schema;
 
 /// 单块内容。与 MCP `Content` 一 一对应（P0 支持 text/image/audio；
 /// resource 留待需要时加入）。
 #[derive(Debug, Clone, PartialEq)]
 pub enum Block {
-    Text { text: String },
+    Text {
+        text: String,
+    },
     /// `data` 是 base64 载荷（MCP 协议形态，不做原始字节存储）。
-    Image { mime_type: String, data: String },
-    Audio { mime_type: String, data: String },
+    Image {
+        mime_type: String,
+        data: String,
+    },
+    Audio {
+        mime_type: String,
+        data: String,
+    },
 }
 
 /// 块结果：handler 的返回类型（实现 [`XyzSchema`] 与 [`Serialize`]，

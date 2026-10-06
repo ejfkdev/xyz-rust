@@ -18,6 +18,7 @@ use crate::errors;
 use crate::registry::Registry;
 use crate::spec::Entry;
 
+use super::format::Format;
 use super::tree::{CmdNode, build_tree};
 
 type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
@@ -40,6 +41,8 @@ pub struct App {
     pub(crate) out: SharedWriter,
     pub(crate) err_out: SharedWriter,
     pub(crate) mws: Vec<ExecFunc>,
+    /// --xyz.format 注入的默认格式（""=text）；裸 --format/--json 覆盖之。
+    pub(crate) default_format: String,
 }
 
 /// 嵌入场景的前端级配置（零值保持 stdout/stderr）。
@@ -47,6 +50,8 @@ pub struct App {
 pub struct Options {
     pub out: Option<Box<dyn Write + Send>>,
     pub err_out: Option<Box<dyn Write + Send>>,
+    /// 默认输出格式（--xyz.format 经派发器注入；None/空=text）。
+    pub format: Option<String>,
 }
 
 /// 一次叶子命令执行的只读快照，交给 Execute 中间件（use_mw）。
@@ -55,7 +60,9 @@ pub struct ExecContext {
     pub path: String,
     /// 命令元数据（Hints、InputSchema、OutputSchema）。
     pub entry: Arc<Entry>,
-    /// --json 是否生效（未调 next 自行渲染时可参考）。
+    /// 生效的输出格式（spec §10.7；未调 next 自行渲染时可参考）。
+    pub format: Format,
+    /// 机器格式（json/jsonl）——保留的兼容字段，等价 format.is_machine()。
     pub json: bool,
     /// 结果的输出目标（Arc<Mutex>，lock 后即 &mut dyn Write）。
     pub out: SharedWriter,
@@ -86,6 +93,7 @@ impl App {
             out: Arc::new(Mutex::new(Box::new(std::io::stdout()))),
             err_out: Arc::new(Mutex::new(Box::new(std::io::stderr()))),
             mws: Vec::new(),
+            default_format: String::new(),
         })
     }
 
@@ -97,6 +105,9 @@ impl App {
         }
         if let Some(e) = opts.err_out {
             a.err_out = Arc::new(Mutex::new(e));
+        }
+        if let Some(f) = opts.format {
+            a.default_format = f;
         }
         Ok(a)
     }
@@ -153,25 +164,115 @@ impl App {
                 return 0;
             }
         }
-        let mut json_out = false;
+        // 输出格式（spec §10.7）：默认取 --xyz.format（注入 default_format），
+        // 裸 --format/--json 在未被目标命令同名 flag 遮蔽时覆盖之；全称
+        // --xyz.format 已在派发层消费（不受遮蔽影响）。
+        let target = self.resolve_target(args);
+        let format_conflict = target.map(|n| node_has_flag(n, "format")).unwrap_or(false);
+        let json_conflict = target.map(|n| node_has_flag(n, "json")).unwrap_or(false);
+        let mut bare: Option<String> = None;
         let mut filtered: Vec<String> = Vec::with_capacity(args.len());
         let mut past_double_dash = false;
-        for arg in args {
-            match arg.as_str() {
+        let mut i = 0;
+        while i < args.len() {
+            let a = &args[i];
+            if past_double_dash {
+                filtered.push(a.clone());
+                i += 1;
+                continue;
+            }
+            match a.as_str() {
                 "--" => {
                     past_double_dash = true;
-                    filtered.push(arg.clone());
+                    filtered.push(a.clone());
                 }
-                _ if past_double_dash => filtered.push(arg.clone()),
-                "--json" => json_out = true,
-                _ => filtered.push(arg.clone()),
+                "--json" if !json_conflict => bare = Some("json".to_string()),
+                "--format" if !format_conflict => {
+                    if i + 1 >= args.len() {
+                        let _ = writeln!(
+                            self.err_out.lock().unwrap(),
+                            "{bin}: --format needs an argument (text|json|jsonl|markdown)"
+                        );
+                        return 2;
+                    }
+                    i += 1;
+                    bare = Some(args[i].clone());
+                }
+                _ if a.starts_with("--format=") && !format_conflict => {
+                    bare = Some(a["--format=".len()..].to_string());
+                }
+                // 被遮蔽（或未知）的裸标志原样留给命令自己的解析。
+                _ => filtered.push(a.clone()),
             }
+            i += 1;
         }
-        if let Err(e) = self.execute(ctx, self.root.clone(), &filtered, json_out, &bin) {
-            let _ = writeln!(self.err_out.lock().unwrap(), "{e}");
+        let spec = bare.unwrap_or_else(|| self.default_format.clone());
+        let Some(format) = Format::parse(&spec) else {
+            let _ = writeln!(
+                self.err_out.lock().unwrap(),
+                "{bin}: invalid output format {spec:?} (want text|json|jsonl|markdown)"
+            );
+            return 2;
+        };
+        if let Err(e) = self.execute(ctx, self.root.clone(), &filtered, format, &bin) {
+            self.render_error(&e, format);
             return exit_code_of(&e);
         }
         0
+    }
+
+    /// 目标节点解析（§10.7 冲突让位判定用）：沿非 flag 段下沉（含默认子
+    /// 命令转发），返回最深可达节点。
+    fn resolve_target(&self, args: &[String]) -> Option<&CmdNode> {
+        let mut node: &CmdNode = &self.root;
+        let mut rest = args;
+        loop {
+            let Some(first) = rest.first() else {
+                return Some(node);
+            };
+            if first == "--" || first.starts_with('-') {
+                rest = &rest[1..];
+                continue;
+            }
+            if let Some(child) = node
+                .children
+                .iter()
+                .find(|c| c.segment == *first || (c.leaf && c.aliases.iter().any(|a| a == first)))
+            {
+                node = child;
+                rest = &rest[1..];
+                continue;
+            }
+            let default_seg = node.default_segment.clone();
+            if let Some(seg) = default_seg
+                && let Some(child) = node.children.iter().find(|c| c.segment == seg)
+            {
+                node = child;
+                continue; // 默认子命令：不消费该段
+            }
+            return Some(node);
+        }
+    }
+
+    /// 命令错误 → stderr（spec §10.7/§8.6）：机器格式写共享错误体
+    /// （json pretty / jsonl 紧凑），其余格式写人类可读一行。
+    fn render_error(&self, e: &errors::Error, format: Format) {
+        let mut w = self.err_out.lock().unwrap();
+        match format {
+            Format::Json | Format::JsonL => {
+                let body = errors::error_body(e);
+                let s = if format == Format::Json {
+                    serde_json::to_string_pretty(&body)
+                } else {
+                    serde_json::to_string(&body)
+                }
+                .unwrap_or_else(|_| "{\"error\":\"\"}".to_string());
+                let _ = writeln!(*w, "{s}");
+            }
+            _ => {
+                let _ = writeln!(*w, "{e}");
+            }
+        }
     }
 
     fn root_collect_top(&self) -> Vec<String> {
@@ -187,7 +288,7 @@ impl App {
         ctx: &Ctx,
         mut node: CmdNode,
         args: &[String],
-        json_out: bool,
+        format: Format,
         bin: &str,
     ) -> errors::Result<()> {
         let mut rest = args;
@@ -295,7 +396,8 @@ impl App {
         let ec = ExecContext {
             path: node.path.clone(),
             entry,
-            json: json_out,
+            format,
+            json: format.is_machine(),
             out: Arc::clone(&self.out),
         };
 
@@ -307,13 +409,19 @@ impl App {
                 return Ok(());
             }
             let mut w = ec.out.lock().unwrap();
-            if ec.json {
-                let s = serde_json::to_string_pretty(&out).map_err(|e| {
-                    errors::Error::new(errors::Kind::Internal, format!("result serialization: {e}"))
-                })?;
-                writeln!(*w, "{s}").map_err(io_err)?;
-            } else {
-                super::render::render(&mut **w, &out)?;
+            match ec.format {
+                Format::Text => super::render::render(&mut **w, &out)?,
+                Format::Json => {
+                    let s = serde_json::to_string_pretty(&out).map_err(|e| {
+                        errors::Error::new(
+                            errors::Kind::Internal,
+                            format!("result serialization: {e}"),
+                        )
+                    })?;
+                    writeln!(*w, "{s}").map_err(io_err)?;
+                }
+                Format::JsonL => super::format::render_jsonl(&mut **w, &out)?,
+                Format::Markdown => super::format::render_markdown(&mut **w, &out)?,
             }
             Ok(())
         };
@@ -353,6 +461,11 @@ impl App {
 
 fn io_err(e: std::io::Error) -> errors::Error {
     errors::Error::new(errors::Kind::Internal, format!("write error: {e}"))
+}
+
+/// 目标命令是否定义了同名长 flag（spec §10.7 裸标志让位判定）。
+fn node_has_flag(node: &CmdNode, long: &str) -> bool {
+    node.leaf && node.defs.iter().any(|d| d.long == long)
 }
 
 /// 把 handler 错误映射成退出码：有分类的按表；未分类（flag/用法等）给 2。

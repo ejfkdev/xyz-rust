@@ -73,10 +73,44 @@ pub struct Config {
     /// 打印）。空 = 不插入。
     pub help_before: String,
     pub help_after: String,
+
+    /// 应用名（spec §11.6/§12.6）：X-App-Name 响应头与 MCP serverInfo.name。
+    /// 空 = 二进制 basename。
+    pub name: String,
+    /// 应用版本（spec §11.6/§12.6）：X-App-Version 响应头与
+    /// serverInfo.version。空 = version::version()（默认 "dev"）。
+    /// 与 xyz 库自身的版本（version::SDK_VERSION → X-XYZ-Version）无关。
+    pub version: String,
+    /// --format 的默认值（--xyz.format 注入）："" = text。
+    /// 裸 --format/--json 在未被命令 flag 遮蔽时覆盖之（spec §10.7）。
+    pub format: String,
+    /// 附加到每个 HTTP 响应的自定义静态头（键值原样写入；与自动
+    /// X-App-*/X-XYZ-* 头并存）。命令行：--xyz.header k=v（可重复）。
+    pub response_headers: Vec<(String, String)>,
+    /// 关闭自动服务器上下文头（HTTP 的 X-App-*/X-XYZ-* 与 MCP 结果的
+    /// _meta.xyz）：spec §11.6/§12.8 的单一开关。自定义头不受影响。
+    /// 命令行：--xyz.no-server-headers。
+    pub no_server_headers: bool,
 }
 
 impl Config {
     pub fn default_log_level(&self) -> logx::Level {
         self.log_level
+    }
+
+    /// 应用名：config 覆盖 > 二进制 basename（spec §11.6/§12.6）。
+    pub fn resolved_name(&self) -> String {
+        if !self.name.is_empty() {
+            return self.name.clone();
+        }
+        crate::cli::bin_name()
+    }
+
+    /// 应用版本：config 覆盖 > 版本槽（默认 "dev"）。
+    pub fn resolved_version(&self) -> String {
+        if !self.version.is_empty() {
+            return self.version.clone();
+        }
+        crate::version::version().to_string()
     }
 }

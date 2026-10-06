@@ -39,6 +39,7 @@ fn reg() -> Registry {
         .summary("求和")
         .description("两个整数相加")
         .mcp(MCPHints {
+            name: String::new(),
             skip: false,
             annotations: vec!["read".into(), "title:求和工具".into(), "destructive".into()],
             fields: std::collections::HashMap::from([(
@@ -206,7 +207,7 @@ fn block_envelope_passes_through() {
         {"type":"text","text":"hello"},
         {"type":"image","mimeType":"image/png","data":"aGVsbG8="}
     ]});
-    let resp = handler::success_response(env.clone());
+    let resp = handler::success_response(env.clone(), None);
     let CallToolResponse::Complete(res) = resp else {
         panic!("want complete response");
     };
@@ -226,7 +227,7 @@ fn block_envelope_passes_through() {
     assert_eq!(res.structured_content, Some(env));
 
     // 普通 JSON 不误报：走 §12.5 文本+structured 双内容。
-    let resp = handler::success_response(serde_json::json!({"msg": "hi"}));
+    let resp = handler::success_response(serde_json::json!({"msg": "hi"}), None);
     let CallToolResponse::Complete(plain) = resp else {
         panic!("want complete response");
     };
@@ -239,4 +240,105 @@ fn block_envelope_passes_through() {
         plain.structured_content,
         Some(serde_json::json!({"msg": "hi"}))
     );
+}
+
+#[test]
+fn mcp_name_override() {
+    use crate::spec::command::Command;
+
+    fn hello(_: &Ctx, _: &SumArgs) -> errors::Result<String> {
+        Ok("hi".to_string())
+    }
+
+    // §12.4a：覆写名是 tools/list 通告与 tools/call 接受的唯一名字。
+    let reg = Registry::new();
+    Command::new("svc.echo", hello)
+        .mcp(MCPHints {
+            name: "sys.echo".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let srv = handler::build(&reg, &Options::default(), Arc::new(Ctx::new())).unwrap();
+    assert!(
+        srv.get_tool("sys.echo").is_some(),
+        "override name must be listed"
+    );
+    assert!(
+        srv.get_tool("svc.echo").is_none(),
+        "original name must not be callable once overridden"
+    );
+
+    // 覆写名同样受 §3.1 文法约束（注册期报错）。
+    let reg2 = Registry::new();
+    let err = Command::new("svc.echo", hello)
+        .mcp(MCPHints {
+            name: "bad name!".into(),
+            ..Default::default()
+        })
+        .register(&reg2)
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("mcp name override"),
+        "want grammar rejection, got: {err}"
+    );
+}
+
+#[test]
+fn result_meta_shape() {
+    use crate::errors;
+    use handler::{result_meta, success_response};
+    use rmcp::model::CallToolResponse;
+
+    // §12.8：成功结果 _meta.xyz = 身份 + 库版本 + 命令 + 耗时（+ 自定义头）。
+    let meta = result_meta(
+        "app",
+        "1.2",
+        &[("X-Env".to_string(), "test".to_string())],
+        "math.sum",
+        7,
+        None,
+    );
+    let v = serde_json::to_value(&meta).unwrap();
+    let xyz = &v["xyz"];
+    assert_eq!(xyz["app_name"], "app");
+    assert_eq!(xyz["app_version"], "1.2");
+    assert_eq!(xyz["sdk_version"], crate::version::SDK_VERSION);
+    assert_eq!(xyz["command"], "math.sum");
+    assert_eq!(xyz["duration_ms"], 7);
+    assert_eq!(xyz["headers"]["X-Env"], "test");
+    assert!(xyz.get("error").is_none());
+
+    // 失败结果：_meta.xyz.error 带 kind/code/detail（§8.6 投影）。
+    let err = errors::Error::new(errors::Kind::NotFound, "user 7")
+        .with_code("USER_NOT_FOUND")
+        .with_detail("user_id", serde_json::json!(7));
+    let body = errors::error_body(&err);
+    let meta = result_meta("app", "dev", &[], "svc.get", 3, Some(&body));
+    let v = serde_json::to_value(&meta).unwrap();
+    assert_eq!(v["xyz"]["error"]["kind"], "not_found");
+    assert_eq!(v["xyz"]["error"]["code"], "USER_NOT_FOUND");
+    assert_eq!(v["xyz"]["error"]["detail"]["user_id"], 7);
+
+    // success_response 把 meta 挂到结果上。
+    let resp = success_response(serde_json::json!("ok"), Some(meta));
+    let CallToolResponse::Complete(res) = resp else {
+        panic!("complete");
+    };
+    assert!(res.meta.is_some());
+}
+
+#[test]
+fn rich_error_http_status_override() {
+    use crate::errors;
+    // §8.5：status 覆盖 Kind 推导（HTTP 通道语义，投影层可读）。
+    let e = errors::Error::new(errors::Kind::Conflict, "duplicate").with_status(410);
+    assert_eq!(errors::error_status(&e), 410);
+    let plain = errors::Error::new(errors::Kind::NotFound, "no");
+    assert_eq!(errors::error_status(&plain), 404);
+    // wrap 后富化层仍可从链上读回（from_chain）。
+    let wrapped = errors::Error::wrap(errors::Kind::Unavailable, e);
+    let body = errors::error_body(&wrapped);
+    assert_eq!(body.code, None); // 外层无 code；kind 取链上首个分类载体
+    assert_eq!(body.kind, errors::Kind::Unavailable);
 }

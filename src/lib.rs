@@ -57,8 +57,8 @@ extern crate self as xyz_rust;
 #[cfg(test)]
 mod dispatch_test;
 
-pub mod builder;
 pub mod blocks;
+pub mod builder;
 pub mod builtins;
 pub mod cli;
 pub mod config;

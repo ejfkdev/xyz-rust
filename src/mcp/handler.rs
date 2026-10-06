@@ -11,8 +11,8 @@ use rmcp::ErrorData;
 use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
-    ListToolsResult, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerInfo, Tool,
-    ToolAnnotations,
+    ListToolsResult, MetaObject, PaginatedRequestParams, ProtocolVersion, ServerCapabilities,
+    ServerInfo, Tool, ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 
@@ -32,6 +32,16 @@ pub struct XyzServer {
     allowed: Option<std::collections::BTreeSet<String>>,
     pub(crate) ctx: Arc<Ctx>,
     defaults: std::collections::HashMap<String, String>,
+    /// 结果 _meta.xyz 的上下文（§12.8）：None = 关闭（no_server_meta）。
+    meta_ctx: Option<MetaCtx>,
+}
+
+/// _meta.xyz 的静态身份分量（每个结果复用）。
+#[derive(Clone)]
+struct MetaCtx {
+    app_name: String,
+    app_version: String,
+    headers: Vec<(String, String)>,
 }
 
 /// 构建服务器实现。未登记的协议版本在注册期报错（与「注册期即报错」
@@ -70,6 +80,7 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
         Some(opts.versions.iter().cloned().collect())
     };
     let (name, version) = impl_name(opts);
+    let (meta_name, meta_version) = (name.clone(), version.clone());
     let impl_info = Implementation::new(name, version);
 
     let mut tools = Vec::new();
@@ -93,7 +104,7 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
             )
         });
         let mut tool = Tool::new_with_raw(
-            e.name.clone(),
+            tool_name(&e),
             Some(std::borrow::Cow::Owned(tool_description(&e))),
             input_schema,
         );
@@ -104,9 +115,20 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
             tool = tool.with_annotations(ann);
         }
         tools.push(tool);
-        by_name.insert(e.name.clone(), e);
+        by_name.insert(tool_name(&e), e);
     }
 
+    let meta_ctx = if opts.no_server_meta {
+        None
+    } else {
+        // serverInfo 与 _meta 用同一身份（§12.6/§12.8；impl_name 已解析
+        // basename / 默认版本）。
+        Some(MetaCtx {
+            app_name: meta_name,
+            app_version: meta_version,
+            headers: opts.response_headers.clone(),
+        })
+    };
     Ok(XyzServer {
         impl_info,
         instructions: if opts.instructions.is_empty() {
@@ -120,6 +142,7 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
         allowed,
         ctx,
         defaults: opts.defaults.clone(),
+        meta_ctx,
     })
 }
 
@@ -197,34 +220,109 @@ impl ServerHandler for XyzServer {
                 arguments.insert(k.clone(), serde_json::Value::String(v.clone()));
             }
         }
+        let started = std::time::Instant::now();
         match (entry.invoke)(&self.ctx, &arguments) {
-            Ok(out) => Ok(success_response(out)),
+            Ok(out) => {
+                let meta = self.meta_for(&entry.name, started.elapsed(), None);
+                Ok(success_response(out, meta))
+            }
             Err(e) => {
                 let msg = match e.cause() {
                     Some(c) => c.to_string(),
                     None => e.to_string(),
                 };
-                Ok(CallToolResponse::Complete(CallToolResult::error(vec![
-                    ContentBlock::text(msg),
-                ])))
+                // §8.6 + §12.8：失败结果带共享错误体投影的 _meta.xyz.error。
+                let body = errors::error_body(&e);
+                let meta = self.meta_for(&entry.name, started.elapsed(), Some(&body));
+                let mut result = CallToolResult::error(vec![ContentBlock::text(msg)]);
+                result.meta = meta;
+                Ok(CallToolResponse::Complete(result))
             }
         }
     }
 }
 
+impl XyzServer {
+    /// 单次调用结果的 _meta.xyz（§12.8）；关闭时 None。
+    fn meta_for(
+        &self,
+        command: &str,
+        duration: std::time::Duration,
+        err: Option<&errors::Body>,
+    ) -> Option<MetaObject> {
+        let ctx = self.meta_ctx.as_ref()?;
+        Some(result_meta(
+            &ctx.app_name,
+            &ctx.app_version,
+            &ctx.headers,
+            command,
+            duration.as_millis(),
+            err,
+        ))
+    }
+}
+
+/// 构造 _meta.xyz 服务器上下文（spec §12.8，形状对齐 HTTP §11.6 头）：
+/// 应用身份 + xyz 库版本 + 命令 + 耗时 + 可选自定义头与错误上下文
+/// （kind/code/detail，让 MCP 客户端无需解析文本即可分支）。
+pub(super) fn result_meta(
+    app_name: &str,
+    app_version: &str,
+    headers: &[(String, String)],
+    command: &str,
+    duration_ms: u128,
+    err: Option<&errors::Body>,
+) -> MetaObject {
+    let mut xyz = serde_json::Map::new();
+    xyz.insert("app_name".into(), serde_json::json!(app_name));
+    xyz.insert("app_version".into(), serde_json::json!(app_version));
+    xyz.insert(
+        "sdk_version".into(),
+        serde_json::json!(crate::version::SDK_VERSION),
+    );
+    xyz.insert("command".into(), serde_json::json!(command));
+    xyz.insert("duration_ms".into(), serde_json::json!(duration_ms));
+    if !headers.is_empty() {
+        let mut hs = serde_json::Map::new();
+        for (k, v) in headers {
+            hs.insert(k.clone(), serde_json::Value::String(v.clone()));
+        }
+        xyz.insert("headers".into(), serde_json::Value::Object(hs));
+    }
+    if let Some(b) = err {
+        let mut em = serde_json::Map::new();
+        em.insert("kind".into(), serde_json::json!(b.kind.as_str()));
+        if let Some(code) = &b.code {
+            em.insert("code".into(), serde_json::json!(code));
+        }
+        if let Some(detail) = &b.detail {
+            em.insert("detail".into(), serde_json::Value::Object(detail.clone()));
+        }
+        xyz.insert("error".into(), serde_json::Value::Object(em));
+    }
+    let mut root = serde_json::Map::new();
+    root.insert("xyz".into(), serde_json::Value::Object(xyz));
+    MetaObject(root)
+}
+
 /// 成功结果 → CallToolResponse：保留块信封原样透传 Content 块
 /// （spec §12.7）；其余走 §12.5 的双内容（文本 + structuredContent）。
-pub(super) fn success_response(out: serde_json::Value) -> CallToolResponse {
+pub(super) fn success_response(
+    out: serde_json::Value,
+    meta: Option<MetaObject>,
+) -> CallToolResponse {
     if let Some(blocks) = crate::blocks::extract(&out) {
         let mut result = CallToolResult::error(to_rmcp_blocks(&blocks));
         result.is_error = None;
         result.structured_content = Some(out);
+        result.meta = meta;
         return CallToolResponse::Complete(result);
     }
     let text = render_text(&out);
     let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
     result.is_error = None;
     result.structured_content = Some(out);
+    result.meta = meta;
     CallToolResponse::Complete(result)
 }
 
@@ -250,6 +348,15 @@ fn to_rmcp_blocks(blocks: &[crate::blocks::Block]) -> Vec<ContentBlock> {
             }
         })
         .collect()
+}
+
+/// MCP 工具名：MCPHints.name 覆写优先（spec §12.4a），否则点分注册名。
+fn tool_name(e: &Entry) -> String {
+    if e.mcp.name.is_empty() {
+        e.name.clone()
+    } else {
+        e.mcp.name.clone()
+    }
 }
 
 fn tool_description(e: &Entry) -> String {

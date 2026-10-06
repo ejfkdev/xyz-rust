@@ -218,7 +218,7 @@ define("extract", extract)
 ```
 
 
-**CLI**（std + serde；自带前端不引 clap——`examples/clap` 演示如何换用 clap）：注册名 `user.add` 生成两级子命令 `user add`；`-h/--help` 逐命令帮助（内联 `(default …)`/`(env …)`/`(oneof …)` 提示），`-v/--version` 输出版本（默认 `CARGO_PKG_VERSION`，可用 `set_version("v1.2.3")` 覆盖——Rust 没有 Go 的 `-ldflags -X` 等价机制）。
+**CLI**（std + serde；自带前端不引 clap——`examples/clap` 演示如何换用 clap）：注册名 `user.add` 生成两级子命令 `user add`；`-h/--help` 逐命令帮助（内联 `(default …)`/`(env …)`/`(oneof …)` 提示），-v/--version` 输出*应用*版本（默认 `dev`，可用 `set_version("v1.2.3")` 覆盖——Rust 没有 Go 的 `-ldflags -X` 等价机制；xyz 库自身版本另行报告于 `X-XYZ-Version`/`_meta.xyz.sdk_version`，xyz-spec §11.6/§12.8）。
 
 **HTTP**（axum）：路由即 `HTTPHints { method, path }`（`{name}` 为路径参数，绑定到 `http = "path"` 的字段）；未标注 `http:` 的字段默认从查询串绑定，JSON body 合并为入参基底；支持方法 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS（其余在注册期报错）；状态码由错误分类映射（400/401/403/404/409/499/500/503），错误响应 `{"error":"..."}`；`GET /openapi.json` 输出由同一 `InputSchema` 生成的 OpenAPI 3 文档（含同源的响应 schema）；`GET /healthz` 探活、gzip 自动压缩。未声明路由的命令不会出现在 REST 里。
 
@@ -396,14 +396,14 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 3. **无反射**：Go 侧靠 struct tag 反射在运行时做的事，Rust 全部由派生宏编译期生成。属性词汇 `#[xyz(desc="...", name="w", required, secret, skip, validate="min=2,email", default="18", enum="a,b", cli="positional"/"shorthand=a,env=X"/"hidden"/"-", http="query|path|header|form|body", http_name="X-Key")]` 与 Go 的 tag 逐一对应，另支持 serde `rename` 回退与 `rename_all`；命名标量 newtype 用 `#[derive(XyzField)]`；结果 struct 用 `#[derive(Serialize, XyzOutput)]`（wire 名走 serde 惯例），也可不 derive——`XyzArgs` 入参 struct 自动获得 `XyzSchema`。
 4. **Handler 形态**：`fn(handler(_: &Ctx, _: &Args) -> Result<Resp, E>)`，`E: std::error::Error`（错误链上的分类被保留），`R: Serialize`。`define("name", h)` 全类型推断，无 Go 的 `Define[T,R]` 显式泛型。
 5. **结果渲染**：struct 与 map 同形——都先经 serde_json 序列化成 `Value`，`preserve_order` 保留声明序（Go 的 map 按键排序）；`Vec<u8>` 作为结果类型的输出 schema 是数组形（输入侧仍是 string）；`std::time::Duration` 负值不支持（Rust 语义）；oneof 对 struct 无 `%v` 形态。
-6. **版本注入**：发布期调用 `set_version("v1.2.3")`——Rust 没有 `-ldflags -X` 注入，默认取 `CARGO_PKG_VERSION`。
+6. **版本注入**：发布期调用 `set_version("v1.2.3")`——Rust 没有 `-ldflags -X` 注入，默认*应用*版本为 `dev`（xyz-spec §12.6）；库自身版本（`version::SDK_VERSION` = crate 版本）另行报告于 `X-XYZ-Version` 与 `_meta.xyz.sdk_version`。
 7. **HTTP 语义**：Gzip 用 `tower-http`（任意体积响应都压缩，且完整处理 `Accept-Encoding` 的 q 值；Go 只查头）；每请求超时经 `TimeoutLayer` 应答 **408**（而非 504）；请求级取消——客户端断开不打断 handler 执行；标准头超时未配置（非零 `Config.timeout` 是唯一超时层）。
 8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）。
 9. **能力开关在运行时仍然可用**：`Capabilities { no_cli, no_mcp, no_http }` 是 `Config` 字段，与 Cargo features 相互独立。
 
 以上全部差异连同规范章节引用，登记在规范仓库的
 [差异登记表](https://github.com/ejfkdev/xyz-spec/blob/main/deviations.md)
-（`D-rust-01` … `D-rust-11`），并在 [CONFORMANCE.md](CONFORMANCE.md)
+（`D-rust-01` … `D-rust-13`），并在 [CONFORMANCE.md](CONFORMANCE.md)
 中向规范 v0.1.0 宣誓。
 
 ## 依赖原则与体积

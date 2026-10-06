@@ -527,13 +527,16 @@ fn spec_depth_guard_panics_on_deep_nesting() {
 
 #[test]
 fn tagged_union_schema_and_decode() {
-    use crate::spec::field::FieldKind;
     use crate::spec::XyzField;
+    use crate::spec::field::FieldKind;
 
     #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
     #[serde(tag = "type")]
     enum Target {
-        Element { state_id: i64, index: i64 },
+        Element {
+            state_id: i64,
+            index: i64,
+        },
         Coordinate {
             #[xyz(desc = "横坐标", required)]
             x: i64,
@@ -546,9 +549,15 @@ fn tagged_union_schema_and_decode() {
     let e: Target =
         Target::xyz_from_value(&serde_json::json!({"type": "Element", "state_id": 9, "index": 1}))
             .unwrap();
-    assert_eq!(e, Target::Element { state_id: 9, index: 1 });
-    let c: Target = Target::xyz_from_value(&serde_json::json!({"type": "Coordinate", "x": 1, "y": 2}))
-        .unwrap();
+    assert_eq!(
+        e,
+        Target::Element {
+            state_id: 9,
+            index: 1
+        }
+    );
+    let c: Target =
+        Target::xyz_from_value(&serde_json::json!({"type": "Coordinate", "x": 1, "y": 2})).unwrap();
     assert_eq!(c, Target::Coordinate { x: 1, y: 2 });
     assert!(Target::xyz_from_value(&serde_json::json!({"type": "Ghost"})).is_err());
     assert!(Target::xyz_from_value(&serde_json::json!({"x": 1, "y": 2})).is_err());
@@ -583,10 +592,9 @@ fn tagged_union_schema_and_decode() {
 
 #[test]
 fn tagged_union_into_entry_schema() {
+    use crate::Ctx;
     use crate::registry::Registry;
     use crate::spec::command::Command;
-    use crate::spec::XyzArgs;
-    use crate::Ctx;
 
     #[derive(serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
     #[serde(tag = "kind")]
@@ -609,9 +617,7 @@ fn tagged_union_into_entry_schema() {
     }
 
     let reg = Registry::new();
-    Command::new("demo.pick", pick)
-        .register(&reg)
-        .unwrap();
+    Command::new("demo.pick", pick).register(&reg).unwrap();
     let entry = reg.get("demo.pick").unwrap();
     let sch = crate::spec::schema::schema_to_value(&entry.input_schema);
     let sel = &sch["properties"]["sel"];
@@ -622,24 +628,34 @@ fn tagged_union_into_entry_schema() {
         &serde_json::from_str(r#"{"sel":{"kind":"ById","id":7}}"#).unwrap(),
     )
     .unwrap();
-    assert_eq!(serde_json::to_value(out).unwrap(), serde_json::json!("id=7"));
+    assert_eq!(
+        serde_json::to_value(out).unwrap(),
+        serde_json::json!("id=7")
+    );
 }
 
 #[test]
 fn tagged_union_variant_rename_matches_serde() {
+    use crate::spec::XyzField;
     use crate::spec::field::meta_from_spec;
     use crate::spec::schema::{field_schema, schema_to_value};
-    use crate::spec::XyzField;
 
     // Bug A 实锤修复：枚举级 rename_all(="snake_case") 与变体级 rename
     // 都要折射进 schema 的 const 判别值——与 serde 解码所认的名字同源。
     #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
     #[serde(tag = "type", rename_all = "snake_case")]
     enum ActionTarget {
-        ElementRef { state_id: i64 },
-        Coordinate { x: i64, y: i64 },
+        ElementRef {
+            state_id: i64,
+        },
+        Coordinate {
+            x: i64,
+            y: i64,
+        },
         #[serde(rename = "custom-name")]
-        CustomThing { flag: bool },
+        CustomThing {
+            flag: bool,
+        },
     }
 
     // 解码认 snake_case / rename。

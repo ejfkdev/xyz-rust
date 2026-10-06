@@ -211,7 +211,7 @@ fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool
         // 宿主兜底：静默交还，不做任何输出。
         return (0, false);
     }
-    (run_cli(&ctx, reg, &args), true)
+    (run_cli(&ctx, reg, &args, &cfg), true)
 }
 
 /// resolveModes 默认并校验模式词：必须是无前导横线的普通词且两两不同。
@@ -299,12 +299,21 @@ fn spawn_signal_watcher(_ctx: Ctx) {
 // ---- 通道运行时路径（feature 裁剪；stub 与 Go 的 build-tag 口袋对齐）----
 
 #[cfg(feature = "cli")]
-fn run_cli(ctx: &Ctx, reg: &Registry, args: &[String]) -> i32 {
-    crate::cli::run_context(ctx, reg, args, crate::cli::Options::default())
+fn run_cli(ctx: &Ctx, reg: &Registry, args: &[String], cfg: &Config) -> i32 {
+    // --xyz.format 的默认格式经 Options 注入 CLI 前端（spec §10.7）。
+    crate::cli::run_context(
+        ctx,
+        reg,
+        args,
+        crate::cli::Options {
+            format: Some(cfg.format.clone()),
+            ..Default::default()
+        },
+    )
 }
 
 #[cfg(not(feature = "cli"))]
-fn run_cli(_ctx: &Ctx, _reg: &Registry, _args: &[String]) -> i32 {
+fn run_cli(_ctx: &Ctx, _reg: &Registry, _args: &[String], _cfg: &Config) -> i32 {
     eprintln!("xyz: {}", crate::lang::tf("stub.not_compiled", &["CLI"]));
     1
 }

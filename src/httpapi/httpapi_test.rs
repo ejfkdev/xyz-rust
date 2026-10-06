@@ -176,7 +176,50 @@ async fn business_error_maps_to_404_with_error_body() {
         .unwrap();
     let (status, out) = call(router, req).await;
     assert_eq!(status, 404);
-    assert_eq!(out.trim(), "{\"error\":\"no such user\"}");
+    // §8.6 共享错误体：扁平 error 键保留，kind 纯增量。
+    assert_eq!(
+        out.trim(),
+        "{\"error\":\"no such user\",\"kind\":\"not_found\"}"
+    );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn rich_error_body_and_status_override() {
+    use crate::errors;
+    let reg = Registry::new();
+    #[derive(xyz_rust::XyzArgs)]
+    struct RichArgs {
+        #[xyz(desc = "n")]
+        n: String,
+    }
+    fn rich(_: &Ctx, _: &RichArgs) -> errors::Result<String> {
+        Err(errors::new(errors::Kind::Conflict, "dup")
+            .with_code("DUPLICATE")
+            .with_detail("name", serde_json::json!("alice"))
+            .with_status(410))
+    }
+    Command::new("n.rich", rich)
+        .http(HTTPHints {
+            method: "GET".into(),
+            path: "/n/rich".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let router = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/n/rich")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router, req).await;
+    // §8.5 status 覆盖优先于 Kind 推导（Conflict → 409 被 410 覆盖）。
+    assert_eq!(status, 410);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["error"], "dup");
+    assert_eq!(v["kind"], "conflict");
+    assert_eq!(v["code"], "DUPLICATE");
+    assert_eq!(v["detail"]["name"], "alice");
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -343,4 +386,59 @@ fn normalize_addr_port_shorthand() {
     // IPv6 缩写不得被误当端口简写。
     assert_eq!(normalize_addr("::"), "::");
     assert_eq!(normalize_addr("[::1]:8080"), "[::1]:8080");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn server_context_headers_on_all_responses() {
+    use axum::middleware::from_fn;
+    use tower::ServiceExt;
+
+    let router = httpapi::router(&add_reg(), Arc::new(Ctx::new())).unwrap();
+    let with_ctx = router.layer(from_fn(crate::httpapi::middleware::server_context_mw(
+        "appt".to_string(),
+        "9.9".to_string(),
+        vec![("X-Custom".to_string(), "c".to_string())],
+        true,
+    )));
+    // 404（无路由）也带头：身份头全路由。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/nowhere")
+        .body(Body::empty())
+        .unwrap();
+    let resp = with_ctx.oneshot(req).await.unwrap();
+    let h = resp.headers();
+    assert_eq!(h.get("x-app-name").unwrap(), "appt");
+    assert_eq!(h.get("x-app-version").unwrap(), "9.9");
+    assert_eq!(h.get("x-xyz-version").unwrap(), crate::version::SDK_VERSION);
+    assert_eq!(h.get("x-custom").unwrap(), "c");
+
+    // 关闭开关：自动头消失，自定义头保留。
+    let router = httpapi::router(&add_reg(), Arc::new(Ctx::new())).unwrap();
+    let no_auto = router
+        .clone()
+        .layer(from_fn(crate::httpapi::middleware::server_context_mw(
+            "appt".to_string(),
+            "9.9".to_string(),
+            vec![("X-Custom".to_string(), "c".to_string())],
+            false,
+        )));
+    let req = Request::builder()
+        .method("GET")
+        .uri("/nowhere")
+        .body(Body::empty())
+        .unwrap();
+    let resp = no_auto.oneshot(req).await.unwrap();
+    let h = resp.headers();
+    assert!(h.get("x-app-name").is_none());
+    assert_eq!(h.get("x-custom").unwrap(), "c");
+
+    // 每路由头：命中真实命令时带 command/duration。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/users/alice?age=3")
+        .body(Body::empty())
+        .unwrap();
+    let resp = router.oneshot(req).await.unwrap();
+    assert!(resp.headers().get("x-xyz-command").is_none()); // 无 mw 时不留
 }

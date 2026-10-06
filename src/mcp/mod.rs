@@ -76,6 +76,14 @@ pub struct Options {
 
     /// 通道级默认参数（--default k=v）：调用未显式提供时补上。
     pub defaults: std::collections::HashMap<String, String>,
+
+    /// 附加到结果 _meta.xyz.headers 的自定义静态头（spec §12.8，对齐
+    /// HTTP 的 Config.ResponseHeaders / --xyz.header）。
+    pub response_headers: Vec<(String, String)>,
+
+    /// 关闭结果 _meta.xyz 的服务器上下文（spec §12.8 的单一开关，
+    /// 对齐 --xyz.no-server-headers）。
+    pub no_server_meta: bool,
 }
 
 /// 构建服务器实现：每条注册命令一个工具，inputSchema 直接来自注册表的
@@ -92,8 +100,14 @@ pub fn server(
 /// cfg 注入 --xyz.* 折叠后的 preset）。
 pub fn run_with_config(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
     let base = Options {
+        // §12.6：serverInfo 的应用身份（默认 basename / 版本槽，覆盖优先级
+        // 见 Options 文档；xyz 库版本单独报 _meta.xyz.sdk_version）。
+        name: cfg.resolved_name(),
+        version: cfg.resolved_version(),
         addr: cfg.addr.clone(),
         bearer_tokens: cfg.bearer_tokens.clone(),
+        response_headers: cfg.response_headers.clone(),
+        no_server_meta: cfg.no_server_headers,
         ..Default::default()
     };
     transport::run(ctx, reg, args, base)
