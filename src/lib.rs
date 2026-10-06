@@ -76,9 +76,53 @@ pub mod mcp;
 pub mod overview;
 pub mod registry;
 pub mod spec;
+pub mod termx;
 pub mod version;
 
 pub use ctx::Ctx;
+
+/// 当前界面语言（spec §14 item7）：进程级语言槽（`--xyz.lang` > Config >
+/// 环境检测 > en，§15.5）。
+pub fn language() -> &'static str {
+    crate::lang::current().as_str()
+}
+
+/// 进程主输出是否交互式（TTY）。这是格式轴（§10.7）与保留的样式轴
+/// （§10.7a）共享的同一探针接缝。
+pub fn interactive() -> bool {
+    crate::termx::interactive()
+}
+
+/// 颜色是否被环境抑制（`NO_COLOR` 非空或 `TERM=dumb`；§10.7a 保留样式轴
+/// 的输入，先以访问器形式暴露）。
+pub fn no_color() -> bool {
+    crate::termx::no_color()
+}
+
+/// 环境上下文快照（现象 §14 item7 的 `Env()` 访问器）。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnvContext {
+    pub language: &'static str,
+    pub interactive: bool,
+    pub no_color: bool,
+}
+
+/// 一次取齐语言/交互式/颜色抑制（spec §14 item7）。
+pub fn env() -> EnvContext {
+    EnvContext {
+        language: language(),
+        interactive: interactive(),
+        no_color: no_color(),
+    }
+}
+
+/// 请求上下文携带的界面语言（spec §11.7）；未绑定时回退进程语言
+/// （Go `xyz.LanguageFromCtx(ctx)` 的对应物）。
+pub fn language_from_ctx(ctx: &Ctx) -> String {
+    ctx.language()
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| crate::lang::current().as_str().to_string())
+}
 pub use errors as errs;
 
 // 派生宏在最上层以惯用名导出（xyz_rust::XyzArgs 直接可用作 #[derive]）。

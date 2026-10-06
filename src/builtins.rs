@@ -65,10 +65,11 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                 if crate::cli::format::Format::parse(&v).is_none() {
                     return Err(errors::Error::new(
                         errors::Kind::Internal,
-                        format!("invalid --xyz.format {v:?} (want text|json|jsonl|markdown)"),
+                        format!("invalid --xyz.format {v:?} (want auto|text|json|jsonl|markdown)"),
                     ));
                 }
                 cfg.format = v;
+                cfg.format_from_flag = true;
                 true
             }
             "--xyz.header" => {
@@ -126,10 +127,13 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                     if crate::cli::format::Format::parse(v).is_none() {
                         return Err(errors::Error::new(
                             errors::Kind::Internal,
-                            format!("invalid --xyz.format {v:?} (want text|json|jsonl|markdown)"),
+                            format!(
+                                "invalid --xyz.format {v:?} (want auto|text|json|jsonl|markdown)"
+                            ),
                         ));
                     }
                     cfg.format = v.to_string();
+                    cfg.format_from_flag = true;
                     true
                 } else if let Some(v) = a.strip_prefix("--xyz.header=") {
                     merge_header_pairs(&mut cfg.response_headers, v)?;

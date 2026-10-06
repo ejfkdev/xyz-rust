@@ -19,8 +19,8 @@ pub fn write_block(w: &mut dyn Write, s: &str) -> std::io::Result<()> {
 pub fn print_overview(
     w: &mut dyn Write,
     reg: &Registry,
-    serve: &str,
-    mcp_word: &str,
+    words: &crate::dispatch::Words,
+    shadowed: &std::collections::BTreeSet<String>,
     caps: Capabilities,
     help_before: &str,
     help_after: &str,
@@ -36,24 +36,38 @@ pub fn print_overview(
         cli_line += &crate::lang::t("overview.not_compiled");
     }
     let _ = writeln!(buf, "{cli_line}");
-    let serve_line = crate::lang::tf("overview.serve_mode", &[serve]);
-    let serve_line = if caps.no_http {
-        serve_line + &crate::lang::t("overview.disabled")
+    // 模式行（spec §13.1）：被用户命令遮蔽的裸词不列出（其 xyz.<词>
+    // 形式永不展示）；未遮蔽时按状态附禁用/未编译后缀。
+    let http_state = if caps.no_http {
+        crate::lang::t("overview.disabled")
     } else if !crate::dispatch::http_frontend_compiled() {
-        serve_line + &crate::lang::t("overview.not_compiled")
+        crate::lang::t("overview.not_compiled")
     } else {
-        serve_line
+        String::new()
     };
-    let _ = writeln!(buf, "{serve_line}");
-    let mcp_line = crate::lang::tf("overview.mcp_mode", &[mcp_word]);
-    let mcp_line = if caps.no_mcp {
-        mcp_line + &crate::lang::t("overview.disabled")
-    } else if !crate::dispatch::mcp_frontend_compiled() {
-        mcp_line + &crate::lang::t("overview.not_compiled")
-    } else {
-        mcp_line
-    };
-    let _ = writeln!(buf, "{mcp_line}");
+    if !shadowed.contains(&words.serve) {
+        let line = crate::lang::tf("overview.serve_mode", &[&words.serve]);
+        let _ = writeln!(buf, "{line}{http_state}");
+    }
+    if !shadowed.contains(&words.http) {
+        let line = crate::lang::tf("overview.http_mode", &[&words.http]);
+        let _ = writeln!(buf, "{line}{http_state}");
+    }
+    if !shadowed.contains(&words.mcp) {
+        let line = crate::lang::tf("overview.mcp_mode", &[&words.mcp]);
+        let mcp_line = if caps.no_mcp {
+            line + &crate::lang::t("overview.disabled")
+        } else if !crate::dispatch::mcp_frontend_compiled() {
+            line + &crate::lang::t("overview.not_compiled")
+        } else {
+            line
+        };
+        let _ = writeln!(buf, "{mcp_line}");
+    }
+    if !shadowed.contains(&words.help) {
+        let line = crate::lang::tf("overview.help_mode", &[&words.help]);
+        let _ = writeln!(buf, "{line}");
+    }
     let _ = writeln!(buf, "{}", crate::lang::t("overview.builtins"));
     // CLI 被禁用时不生成子命令，总览也不再列出命令表。
     let names = reg.names();

@@ -10,6 +10,8 @@ use crate::logx;
 #[derive(Debug, Clone, Default)]
 pub struct ModeWords {
     pub serve: String,
+    /// 独立的 HTTP 模式（仅 REST + /openapi.json，不挂 /mcp；spec §13.1）。
+    pub http: String,
     pub mcp: String,
     pub help: String,
 }
@@ -81,9 +83,17 @@ pub struct Config {
     /// serverInfo.version。空 = version::version()（默认 "dev"）。
     /// 与 xyz 库自身的版本（version::SDK_VERSION → X-XYZ-Version）无关。
     pub version: String,
-    /// --format 的默认值（--xyz.format 注入）："" = text。
-    /// 裸 --format/--json 在未被命令 flag 遮蔽时覆盖之（spec §10.7）。
+    /// 代码级全局默认格式（spec §10.7 第四层）：""|auto = 按 TTY 解析为
+    /// format_interactive / format_piped。命令行 --xyz.format（第二层，
+    /// format_from_flag 置位）与逐命令 CliHints.format（第三层）优先。
     pub format: String,
+    /// format=auto 时交互式终端下的具体格式（默认 text）。
+    pub format_interactive: String,
+    /// format=auto 时非交互（管道/重定向/其他程序调用）下的具体格式
+    /// （默认 jsonl）。
+    pub format_piped: String,
+    /// 标记 format 来自命令行 --xyz.format（命令行层，高于逐命令 hint）。
+    pub format_from_flag: bool,
     /// 附加到每个 HTTP 响应的自定义静态头（键值原样写入；与自动
     /// X-App-*/X-XYZ-* 头并存）。命令行：--xyz.header k=v（可重复）。
     pub response_headers: Vec<(String, String)>,

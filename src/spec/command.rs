@@ -28,6 +28,9 @@ pub struct CliHints {
     pub usage: String,
     /// 等价的子命令拼写。
     pub aliases: Vec<String>,
+    /// 逐命令的默认输出格式（spec §10.7 第三层）：""=沿用全局；
+    /// 取 auto|text|json|jsonl|markdown。低于命令行两层、高于 Config。
+    pub format: String,
     /// 从帮助列表里隐藏。
     pub hidden: bool,
     /// 使该命令成为其父节点的默认子命令：首段不是已注册命令段（且不是

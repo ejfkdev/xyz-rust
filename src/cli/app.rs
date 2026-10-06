@@ -41,8 +41,18 @@ pub struct App {
     pub(crate) out: SharedWriter,
     pub(crate) err_out: SharedWriter,
     pub(crate) mws: Vec<ExecFunc>,
-    /// --xyz.format 注入的默认格式（""=text）；裸 --format/--json 覆盖之。
+    /// 代码级全局默认格式（spec §10.7 第四层）：""|auto 按 TTY 解析。
     pub(crate) default_format: String,
+    /// --xyz.format 是否来自命令行（第二层，高于逐命令 hint）。
+    pub(crate) format_from_flag: bool,
+    /// auto 交互式下半（默认 text）。
+    pub(crate) format_interactive: String,
+    /// auto 非交互下半（默认 jsonl）。
+    pub(crate) format_piped: String,
+    /// 强制交互式裁定（测试/嵌入；None=按输出目标探测，§10.7）。
+    pub(crate) interactive_override: Option<bool>,
+    /// 输出是否由嵌入方注入（非默认 stdout）：注入 writer 一律非交互。
+    pub(crate) out_injected: bool,
 }
 
 /// 嵌入场景的前端级配置（零值保持 stdout/stderr）。
@@ -50,8 +60,16 @@ pub struct App {
 pub struct Options {
     pub out: Option<Box<dyn Write + Send>>,
     pub err_out: Option<Box<dyn Write + Send>>,
-    /// 默认输出格式（--xyz.format 经派发器注入；None/空=text）。
+    /// 默认输出格式（--xyz.format / Config.Format；None/空=auto）。
     pub format: Option<String>,
+    /// format 来自命令行 --xyz.format（命令行层）。
+    pub format_from_flag: bool,
+    /// auto 的交互式下半（空= text）。
+    pub format_interactive: Option<String>,
+    /// auto 的非交互下半（空= jsonl）。
+    pub format_piped: Option<String>,
+    /// 强制交互式裁定（测试/嵌入用；None=按输出目标探测）。
+    pub interactive: Option<bool>,
 }
 
 /// 一次叶子命令执行的只读快照，交给 Execute 中间件（use_mw）。
@@ -94,6 +112,11 @@ impl App {
             err_out: Arc::new(Mutex::new(Box::new(std::io::stderr()))),
             mws: Vec::new(),
             default_format: String::new(),
+            format_from_flag: false,
+            format_interactive: String::new(),
+            format_piped: String::new(),
+            interactive_override: None,
+            out_injected: false,
         })
     }
 
@@ -102,12 +125,24 @@ impl App {
         let mut a = App::new(reg)?;
         if let Some(o) = opts.out {
             a.out = Arc::new(Mutex::new(o));
+            a.out_injected = true;
         }
         if let Some(e) = opts.err_out {
             a.err_out = Arc::new(Mutex::new(e));
         }
         if let Some(f) = opts.format {
             a.default_format = f;
+        }
+        a.format_from_flag = opts.format_from_flag;
+        if let Some(v) = opts.format_interactive {
+            a.format_interactive = v;
+        }
+        if let Some(v) = opts.format_piped {
+            a.format_piped = v;
+        }
+        a.interactive_override = opts.interactive;
+        if a.out_injected {
+            // 注入 writer 非交互（spec §10.7）：嵌入方可用 interactive 强制。
         }
         Ok(a)
     }
@@ -120,6 +155,7 @@ impl App {
     ) {
         if let Some(o) = out {
             self.out = Arc::new(Mutex::new(o));
+            self.out_injected = true;
         }
         if let Some(e) = err_out {
             self.err_out = Arc::new(Mutex::new(e));
@@ -206,19 +242,65 @@ impl App {
             }
             i += 1;
         }
-        let spec = bare.unwrap_or_else(|| self.default_format.clone());
-        let Some(format) = Format::parse(&spec) else {
+        if let Some(b) = &bare
+            && Format::parse(b).is_none()
+        {
             let _ = writeln!(
                 self.err_out.lock().unwrap(),
-                "{bin}: invalid output format {spec:?} (want text|json|jsonl|markdown)"
+                "{bin}: invalid output format {b:?} (want auto|text|json|jsonl|markdown)"
             );
             return 2;
-        };
+        }
+        let entry = target.and_then(|n| n.entry.clone());
+        let format = self.resolve_format(bare.as_deref(), entry.as_deref());
         if let Err(e) = self.execute(ctx, self.root.clone(), &filtered, format, &bin) {
             self.render_error(&e, format);
             return exit_code_of(&e);
         }
         0
+    }
+
+    /// 输出目标是否交互式（spec §10.7）：强制裁定优先；嵌入注入的 writer
+    /// 一律非交互；默认 stdout 走 termx 探针（与保留的样式轴共用，§10.7a）。
+    pub(crate) fn interactive(&self) -> bool {
+        if let Some(v) = self.interactive_override {
+            return v;
+        }
+        if self.out_injected {
+            return false;
+        }
+        crate::termx::interactive()
+    }
+
+    /// 五级优先级解析本次执行的具体格式（spec §10.7）：bare --format/--json
+    /// （未遮蔽）> --xyz.format（命令行）> CliHints.format > Config.Format >
+    /// auto（按 TTY 解析）。任一层可写 auto（或空白沿用下层）。层 1/2 的
+    /// 非法值在调用方用法错误退出；层 3/4 的非法值宽松忽略（视同未设置）。
+    pub(crate) fn resolve_format(&self, bare: Option<&str>, entry: Option<&Entry>) -> Format {
+        let iv = self.interactive();
+        let resolved = |s: &str| {
+            Format::parse(s).unwrap_or(Format::Auto).resolve(
+                iv,
+                &self.format_interactive,
+                &self.format_piped,
+            )
+        };
+        if let Some(b) = bare {
+            return resolved(b);
+        }
+        if self.format_from_flag {
+            return resolved(&self.default_format);
+        }
+        if let Some(e) = entry
+            && !e.cli.format.is_empty()
+            && Format::parse(&e.cli.format).is_some()
+        {
+            return resolved(&e.cli.format);
+        }
+        if !self.default_format.is_empty() && Format::parse(&self.default_format).is_some() {
+            return resolved(&self.default_format);
+        }
+        Format::Auto.resolve(iv, &self.format_interactive, &self.format_piped)
     }
 
     /// 目标节点解析（§10.7 冲突让位判定用）：沿非 flag 段下沉（含默认子
@@ -410,7 +492,8 @@ impl App {
             }
             let mut w = ec.out.lock().unwrap();
             match ec.format {
-                Format::Text => super::render::render(&mut **w, &out)?,
+                // resolve 后不应到达 Auto（兜底走人类渲染）。
+                Format::Auto | Format::Text => super::render::render(&mut **w, &out)?,
                 Format::Json => {
                     let s = serde_json::to_string_pretty(&out).map_err(|e| {
                         errors::Error::new(

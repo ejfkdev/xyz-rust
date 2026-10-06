@@ -1,6 +1,6 @@
 # Conformance — xyz-rust
 
-Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.4.2**.
+Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.4.4**.
 
 Status: **conformant (baseline anchor)** — xyz-rust is one of the two
 reference implementations the specification was written from.
@@ -16,7 +16,7 @@ following evidence:
 
 | Evidence | Covers |
 |---|---|
-| `cargo test -p xyz-rust --lib` (104 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
+| `cargo test -p xyz-rust --lib` (112 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.88 | A.38–A.39 trim invariants |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
@@ -77,9 +77,44 @@ evidence that locks it:
 - **§12.6/§12.8 MCP identity & result `_meta.xyz` (v0.4.2)** —
   `mcp::mcp_test::result_meta_shape`.
 
-Known remaining gaps are in the deviations register: D-rust-12 closed by
-this release (MCPHints.name), D-go-01 (tagged unions in Go) is the Go
-side's open item.
+## v0.4.4 additions
+
+- **§10.7 TTY-aware `auto` + five-tier precedence** — `Format::Auto`
+  resolves by the output writer (forceable via `cli::Options.interactive`;
+  injected writers are non-interactive); tiers: bare flag > `--xyz.format`
+  > `CliHints.format` > `Config.Format` > `auto`; halves configurable via
+  `Config.FormatInteractive/FormatPiped`. Evidence:
+  `cli::cli_test::format_auto_tty_resolution`,
+  `cli::format::tests::format_parsing`.
+- **§10.7a format/style axes** — shared TTY probe is `termx`
+  (`Interactive`/`NoColor`), surfaced as `xyz_rust::{interactive, no_color}`;
+  the style axis stays reserved (format unaffected by NO_COLOR).
+- **§11.7 per-request language** — `Accept-Language` resolved per request
+  (`lang::parse_accept_language`, q-ordered), carried on the request `Ctx`
+  (`Ctx::with_language`), read by handlers via
+  `xyz_rust::language_from_ctx`, and used to localize framework messages
+  (`http.err_invalid_json`). Evidence:
+  `httpapi::httpapi_test::accept_language_localizes_and_reaches_handler`.
+- **§13.1 four modes + `xyz.<word>` + shadowing** — `serve`/`http` (REST
+  only, no `/mcp`)/`mcp`/`help`; `xyz.<word>` always reaches the built-in;
+  a user command whose top segment equals a mode word shadows the bare
+  form (no more registration error); CLI-skipped commands do not shadow;
+  the overview lists only unshadowed words. Evidence:
+  `dispatch_test::shadowing_modes_and_namespaced_reachability`,
+  `dispatch_test::cli_skipped_commands_do_not_shadow`,
+  `dispatch_test::mode_words_are_no_longer_reserved`.
+- **§10.4/§13.2 help subcommand & mode `-h`** — `help` → overview;
+  `help <mode>` → mode help; `help <command-path>` (dotted or spaced) →
+  detailed command help; `serve|http|mcp -h` prints mode help without
+  starting. Evidence: `dispatch_test::help_subcommand_family`,
+  `dispatch_test::mode_help_does_not_start_servers`.
+- **§14 item 7 environment context** — `xyz_rust::{language, interactive,
+  no_color, env()}` + `EnvContext` + `language_from_ctx`. Evidence:
+  `cli::cli_test::ctx_language_and_env_api`.
+
+Known remaining gaps are in the deviations register: D-rust-12 closed
+(MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;
+the reserved style axis (§10.7a colour) is explicitly future work per spec.
 
 ## Deviations
 

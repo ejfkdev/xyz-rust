@@ -89,6 +89,32 @@ const EN: &[(&str, &str)] = &[
         "Built-in parameters (xyz.Config in code or on the command line): --xyz.addr=:8080 (default listen address) --xyz.bearer=tok1,tok2 (Bearer credentials for serve and MCP http)",
     ),
     ("overview.commands", "Commands:"),
+    (
+        "overview.http_mode",
+        "  <app> {0} [--addr :8080]     HTTP mode (REST routes + /openapi.json only; no /mcp)",
+    ),
+    (
+        "overview.help_mode",
+        "  <app> {0} [command|mode]    detailed help for a command or a mode",
+    ),
+    (
+        "mode_help.serve",
+        "{0}: start the HTTP server — REST routes + /openapi.json + the streamable-HTTP MCP endpoint at /mcp.\n\nFlags (also as --xyz.<name> anywhere):\n  --addr :8080        listen address\n  --bearer tok1,tok2  require Authorization: Bearer <tok>\n  --timeout 45s       read/write/idle timeout\n  --tls-cert/--tls-key  both set → serve HTTPS\n  --cors a,b | *      CORS allowlist\n  --default k=v       channel default (repeatable)\n  --xyz.header k=v    extra response header (repeatable)\n  --xyz.no-server-headers  suppress X-App-*/X-XYZ-* headers\n\nFor REST only (no /mcp), use the http mode. -h/--help prints this.",
+    ),
+    (
+        "mode_help.http",
+        "{0}: start the standalone HTTP server — REST routes + /openapi.json only (no /mcp endpoint).\n\nFlags (also as --xyz.<name> anywhere):\n  --addr :8080        listen address\n  --bearer tok1,tok2  require Authorization: Bearer <tok>\n  --timeout 45s       read/write/idle timeout\n  --tls-cert/--tls-key  both set → serve HTTPS\n  --cors a,b | *      CORS allowlist\n  --default k=v       channel default (repeatable)\n  --xyz.header k=v    extra response header (repeatable)\n  --xyz.no-server-headers  suppress X-App-*/X-XYZ-* headers\n\nFor REST + /mcp together, use the serve mode. -h/--help prints this.",
+    ),
+    (
+        "mode_help.mcp",
+        "{0}: start the MCP server (official SDK); one tool per registered command.\n\nUsage: {0} stdio|http [flags]\n  stdio  local process transport\n  http   streamable HTTP (2026-07-28 needs --stateless)\n\nFlags: --addr :8080, --versions v1,v2, --name N, --server-version V,\n  --bearer tok1,tok2, --cors a,b, --session-timeout 30m, --default k=v.\n-h/--help prints this.",
+    ),
+    (
+        "mode_help.help",
+        "{0}: print help.\n\nUsage: {0} [command|mode]\n  {0}                 the overview (modes + commands)\n  {0} user.add        detailed help for a command (same as `user add -h`)\n  {0} serve|http|mcp  help for a mode\n\nDotted or space-separated command paths both work.",
+    ),
+    ("http.err_invalid_json", "invalid JSON body"),
+    ("http.err_not_found", "not found"),
     ("overview.disabled", " (disabled)"),
     ("overview.not_compiled", " (not compiled into this binary)"),
     ("help.usage", "Usage:"),
@@ -185,6 +211,32 @@ const ZH: &[(&str, &str)] = &[
         "内置参数（代码中的 xyz_rust::Config 或命令行）：--xyz.addr=:8080（默认监听地址） --xyz.bearer=tok1,tok2（serve 与 MCP http 的 Bearer 凭据）",
     ),
     ("overview.commands", "命令:"),
+    (
+        "overview.http_mode",
+        "  <app> {0} [--addr :8080]     HTTP 模式（仅 REST 路由 + /openapi.json；不挂 /mcp）",
+    ),
+    (
+        "overview.help_mode",
+        "  <app> {0} [命令|模式]    某命令或某模式的详细帮助",
+    ),
+    (
+        "mode_help.serve",
+        "{0}：启动 HTTP 服务器——REST 路由 + /openapi.json + 挂在 /mcp 的流式 HTTP MCP 端点。\n\n旗标（亦可用 --xyz.<名> 置于任意位置）：\n  --addr :8080        监听地址\n  --bearer tok1,tok2  要求 Authorization: Bearer <tok>\n  --timeout 45s       读/写/空闲超时\n  --tls-cert/--tls-key  两者都设 → HTTPS\n  --cors a,b | *      CORS 白名单\n  --default k=v       通道默认参数（可重复）\n  --xyz.header k=v    附加响应头（可重复）\n  --xyz.no-server-headers  抑制 X-App-*/X-XYZ-* 头\n\n只要 REST（不挂 /mcp）请用 http 模式。-h/--help 打印本帮助。",
+    ),
+    (
+        "mode_help.http",
+        "{0}：启动单独的 HTTP 服务器——仅 REST 路由 + /openapi.json（不挂 /mcp 端点）。\n\n旗标（亦可用 --xyz.<名> 置于任意位置）：\n  --addr :8080        监听地址\n  --bearer tok1,tok2  要求 Authorization: Bearer <tok>\n  --timeout 45s       读/写/空闲超时\n  --tls-cert/--tls-key  两者都设 → HTTPS\n  --cors a,b | *      CORS 白名单\n  --default k=v       通道默认参数（可重复）\n  --xyz.header k=v    附加响应头（可重复）\n  --xyz.no-server-headers  抑制 X-App-*/X-XYZ-* 头\n\n要 REST + /mcp 一起请用 serve 模式。-h/--help 打印本帮助。",
+    ),
+    (
+        "mode_help.mcp",
+        "{0}：启动 MCP 服务器（官方 SDK）；每个已注册命令一个工具。\n\n用法：{0} stdio|http [旗标]\n  stdio  本地进程传输\n  http   流式 HTTP（2026-07-28 需 --stateless）\n\n旗标：--addr :8080、--versions v1,v2、--name N、--server-version V、\n  --bearer tok1,tok2、--cors a,b、--session-timeout 30m、--default k=v。\n-h/--help 打印本帮助。",
+    ),
+    (
+        "mode_help.help",
+        "{0}：打印帮助。\n\n用法：{0} [命令|模式]\n  {0}                 总览（模式 + 命令）\n  {0} user.add        某命令的详细帮助（等同 `user add -h`）\n  {0} serve|http|mcp  某模式的帮助\n\n命令路径点分或空格分隔皆可。",
+    ),
+    ("http.err_invalid_json", "无效的 JSON 请求体"),
+    ("http.err_not_found", "未找到"),
     ("overview.disabled", "（已禁用）"),
     ("overview.not_compiled", "（本二进制未编译）"),
     ("help.usage", "Usage:"),
@@ -275,6 +327,71 @@ pub fn t(key: &str) -> String {
         return s;
     }
     lookup(lang, key)
+}
+
+/// 当前进程语言（spec §14 item7 的 Language 访问器用）。
+pub fn current() -> XyzLang {
+    STATE.read().unwrap().0
+}
+
+/// 按指定语言查目录（不含用户覆盖表）——逐请求语言（§11.7）的框架消息用。
+pub fn t_lang(lang: XyzLang, key: &str) -> String {
+    lookup(lang, key)
+}
+
+/// t_lang 的带参数形态。
+pub fn tf_lang(lang: XyzLang, key: &str, params: &[&str]) -> String {
+    let mut out = t_lang(lang, key);
+    for (i, p) in params.iter().enumerate() {
+        out = out.replace(&format!("{{{i}}}"), p);
+    }
+    out
+}
+
+/// 解析 HTTP Accept-Language（spec §11.7）：按 q 值择优（缺省 q=1），
+/// `zh*` → zh-CN、`en*` → en；无受支持标签返回 None（调用方回退进程语言）。
+pub fn parse_accept_language(header: &str) -> Option<XyzLang> {
+    let mut best_q = -1.0f64;
+    let mut best: Option<XyzLang> = None;
+    for part in header.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (tag, mut q) = match part.split_once(';') {
+            Some((t, params)) => {
+                let mut q = 1.0f64;
+                for param in params.split(';') {
+                    let param = param.trim();
+                    if let Some(v) = param.strip_prefix("q=")
+                        && let Ok(f) = v.trim().parse::<f64>()
+                    {
+                        q = f;
+                    }
+                }
+                (t.trim(), q)
+            }
+            None => (part, 1.0f64),
+        };
+        let lang = if tag.starts_with("zh") {
+            Some(XyzLang::ZhCn)
+        } else if tag.starts_with("en") {
+            Some(XyzLang::En)
+        } else {
+            None
+        };
+        if let Some(l) = lang
+            && q > best_q
+        {
+            best_q = q;
+            best = Some(l);
+        }
+        if q <= 0.0 {
+            q = 0.0; // q=0 表示不接收；此处仅防守
+        }
+        let _ = q;
+    }
+    best
 }
 
 /// 带参数的 t：模板中的 {0}、{1}… 依次替换。

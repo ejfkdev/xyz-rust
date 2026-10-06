@@ -10,6 +10,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[derive(Clone, Debug, Default)]
 pub struct Ctx {
     cancelled: Arc<AtomicBool>,
+    /// 逐请求界面语言（spec §11.7）：HTTP 前端从 Accept-Language 解析后经
+    /// [`Ctx::with_language`] 派生到请求上下文；其余通道为 None（用进程
+    /// 语言，§15.5）。handler 经 `xyz_rust::language_from_ctx` 读取。
+    language: Option<Arc<str>>,
 }
 
 impl Ctx {
@@ -31,6 +35,18 @@ impl Ctx {
     /// 返回一个可以在线程/任务间共享的底层句柄（信号线程用）。
     pub fn raw(&self) -> Arc<AtomicBool> {
         Arc::clone(&self.cancelled)
+    }
+
+    /// 派生一个携带指定界面语言的上下文（spec §11.7 的逐请求语言载体）。
+    pub fn with_language(&self, lang: &str) -> Ctx {
+        let mut c = self.clone();
+        c.language = Some(Arc::from(lang));
+        c
+    }
+
+    /// 本上下文携带的界面语言；None = 未绑定（用进程语言）。
+    pub fn language(&self) -> Option<&str> {
+        self.language.as_deref()
     }
 }
 

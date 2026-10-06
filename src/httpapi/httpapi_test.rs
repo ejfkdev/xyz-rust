@@ -442,3 +442,86 @@ async fn server_context_headers_on_all_responses() {
     let resp = router.oneshot(req).await.unwrap();
     assert!(resp.headers().get("x-xyz-command").is_none()); // 无 mw 时不留
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn accept_language_localizes_and_reaches_handler() {
+    use crate::lang::{XyzLang, parse_accept_language};
+    // 解析器（spec §11.7）：q 择优 + 前缀匹配 + 不受支持回退 None。
+    assert_eq!(
+        parse_accept_language("zh-CN,zh;q=0.9,en;q=0.8"),
+        Some(XyzLang::ZhCn)
+    );
+    assert_eq!(parse_accept_language("en-US,en;q=0.9"), Some(XyzLang::En));
+    assert_eq!(parse_accept_language("fr,de;q=0.9"), None);
+    assert_eq!(
+        parse_accept_language("en;q=0.3,zh;q=0.9"),
+        Some(XyzLang::ZhCn)
+    );
+
+    // handler 经 language_from_ctx 读请求语言。
+    let reg = Registry::new();
+    #[derive(xyz_rust::XyzArgs)]
+    struct MArgs {
+        #[xyz(desc = "n")]
+        n: String,
+    }
+    fn who(_: &Ctx, _: &MArgs) -> errors::Result<String> {
+        Ok(String::new())
+    }
+    // 换成读 ctx 的版本。
+    struct CtxLang;
+    fn lang_of(ctx: &Ctx, _: &MArgs) -> errors::Result<String> {
+        let _ = CtxLang;
+        Ok(xyz_rust::language_from_ctx(ctx))
+    }
+    Command::new("m.lang", lang_of)
+        .http(HTTPHints {
+            method: "GET".into(),
+            path: "/m/lang".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let _ = who;
+    let router = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/m/lang")
+        .header("Accept-Language", "zh-CN,en;q=0.5")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router.clone(), req).await;
+    assert_eq!(status, 200);
+    assert_eq!(out.trim(), "\"zh-CN\"");
+    // 无 header：回退进程语言。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/m/lang")
+        .body(Body::empty())
+        .unwrap();
+    let (_, out) = call(router, req).await;
+    assert_eq!(
+        out.trim(),
+        format!("\"{}\"", crate::lang::current().as_str())
+    );
+
+    // 框架消息本地化：坏 JSON body 的 400 用请求语言（需 POST 路由）。
+    Command::new("m.post", lang_of)
+        .http(HTTPHints {
+            method: "POST".into(),
+            path: "/m/post".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/m/post")
+        .header("Content-Type", "application/json")
+        .header("Accept-Language", "zh-CN")
+        .body(Body::from("{not json"))
+        .unwrap();
+    let (status, out) = call(httpapi::router(&reg, Arc::new(Ctx::new())).unwrap(), req).await;
+    assert_eq!(status, 400);
+    assert!(out.contains("无效的 JSON 请求体"), "{out}");
+}

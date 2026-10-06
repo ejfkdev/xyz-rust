@@ -54,6 +54,10 @@ fn run_app(reg: &Registry, args: &[&str]) -> (i32, String, String) {
             out: Some(Box::new(out.clone())),
             err_out: Some(Box::new(err.clone())),
             format: None,
+            // 这些测试断言人类可读（text）输出；注入 writer 按规范是非
+            // 交互的（auto→jsonl），故显式声明交互式裁定（§10.7）。
+            interactive: Some(true),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -602,6 +606,8 @@ fn format_dispatch_and_conflict_yield() {
             out: Some(Box::new(out_buf.clone())),
             err_out: Some(Box::new(err_buf.clone())),
             format: Some("json".into()),
+            interactive: Some(true),
+            ..Default::default()
         },
     )
     .unwrap();
@@ -669,4 +675,134 @@ fn format_flag_yields_to_command_field() {
     assert_eq!(code, 0, "err: {err}");
     // 未让位的话会被当全局格式并吃掉参数（命令将报缺参）；这里必须原样到手。
     assert_eq!(out.trim(), "json");
+}
+
+#[test]
+fn format_auto_tty_resolution() {
+    use crate::Ctx;
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct AArgs {
+        #[xyz(desc = "n")]
+        n: i64,
+    }
+    #[derive(xyz_rust::XyzArgs)]
+    struct HArgs {
+        #[xyz(desc = "n")]
+        n: i64,
+    }
+    fn list(_: &Ctx, _: &AArgs) -> crate::errors::Result<Vec<i64>> {
+        Ok(vec![1, 2])
+    }
+    fn hint_md(_: &Ctx, _: &HArgs) -> crate::errors::Result<Vec<i64>> {
+        Ok(vec![3])
+    }
+    let reg = Registry::new();
+    Command::new("a.list", list).register(&reg).unwrap();
+    // 层 3：逐命令 hint。
+    Command::new("a.md", hint_md)
+        .cli(crate::spec::command::CliHints {
+            format: "markdown".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+
+    let run_with = |opts: Options, args: &[&str]| -> (i32, String, String) {
+        let out = Buf::default();
+        let err = Buf::default();
+        let mut a = App::new_with_options(
+            &reg,
+            Options {
+                out: Some(Box::new(out.clone())),
+                err_out: Some(Box::new(err.clone())),
+                ..opts
+            },
+        )
+        .unwrap();
+        let argv: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+        let code = a.run(&argv);
+        (code, out.text(), err.text())
+    };
+
+    // 内建默认 auto：交互式 → text；非交互 → jsonl（spec §10.7）。
+    let (code, out, _) = run_with(
+        Options {
+            interactive: Some(true),
+            ..Default::default()
+        },
+        &["a", "list", "--n", "1"],
+    );
+    assert_eq!(code, 0);
+    assert_eq!(out, "1\n2\n"); // text 渲染（标量每行一个）
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(false),
+            ..Default::default()
+        },
+        &["a", "list", "--n", "1"],
+    );
+    assert_eq!(out, "1\n2\n"); // jsonl：数组逐元素 —— 数字形态一致
+
+    // 两半可配置：交互 → markdown；非交互 → jsonl（默认）。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(true),
+            format_interactive: Some("markdown".into()),
+            ..Default::default()
+        },
+        &["a", "list", "--n", "1"],
+    );
+    assert_eq!(out, "- 1\n- 2\n");
+
+    // 层 3 hint 在非交互下直通（markdown 具体值）。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(false),
+            ..Default::default()
+        },
+        &["a", "md", "--n", "1"],
+    );
+    assert_eq!(out, "- 3\n");
+
+    // 层 4 代码全局（format=json 具体值）压过内建 auto；层 1 命令行压过层 4。
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(false),
+            format: Some("json".into()),
+            ..Default::default()
+        },
+        &["a", "list", "--n", "1"],
+    );
+    assert!(out.trim_start().starts_with('['), "{out}");
+    let (_, out, _) = run_with(
+        Options {
+            interactive: Some(false),
+            format: Some("json".into()),
+            ..Default::default()
+        },
+        &["a", "list", "--n", "1", "--format", "jsonl"],
+    );
+    assert_eq!(out, "1\n2\n");
+}
+
+#[test]
+fn ctx_language_and_env_api() {
+    use crate::Ctx;
+    // 进程级访问器（spec §14 item7）。
+    assert!(!xyz_rust::language().is_empty());
+    let e1 = xyz_rust::env();
+    assert_eq!(e1.language, xyz_rust::language());
+    assert_eq!(e1.no_color, xyz_rust::no_color());
+    // 逐请求语言载体（§11.7）：with_language + language_from_ctx。
+    let ctx = Ctx::new();
+    assert_eq!(xyz_rust::language_from_ctx(&ctx), xyz_rust::language());
+    let zh = ctx.with_language("zh-CN");
+    assert_eq!(xyz_rust::language_from_ctx(&zh), "zh-CN");
+    assert_eq!(zh.language(), Some("zh-CN"));
+    // 取消信号不受语言派生影响。
+    zh.cancel();
+    assert!(zh.cancelled() && ctx.cancelled());
 }

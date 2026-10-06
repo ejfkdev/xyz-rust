@@ -176,6 +176,18 @@ async fn handle_request(
     let query = parts.uri.query().unwrap_or_default().to_string();
     let headers = parts.headers.clone();
 
+    // 逐请求语言（spec §11.7）：Accept-Language 命中受支持语言则用之，否则
+    // 回退进程默认；派生到请求 ctx 供 Invoke 管线、handler 与本地化框架
+    // 消息共用（§14 item7 的 language_from_ctx 读取点）。
+    let req_lang = headers
+        .get(header::ACCEPT_LANGUAGE)
+        .and_then(|v| v.to_str().ok())
+        .and_then(crate::lang::parse_accept_language);
+    let localize = |key: &str| match req_lang {
+        Some(l) => crate::lang::t_lang(l, key),
+        None => crate::lang::t(key),
+    };
+
     let mut m: Map<String, Value> = Map::new();
     // 铺底：HTTP 专属默认值（全局默认由 Invoke 补齐）。
     for (k, v) in entry.http_defaults() {
@@ -206,11 +218,11 @@ async fn handle_request(
                 }
             }
             Ok(_) => {
-                return write_error(StatusCode::BAD_REQUEST, "invalid JSON body");
+                return write_error(StatusCode::BAD_REQUEST, &localize("http.err_invalid_json"));
             }
             Err(_) if json_declared => {
                 // 显式声明 application/json 却解析失败：严格 400。
-                return write_error(StatusCode::BAD_REQUEST, "invalid JSON body");
+                return write_error(StatusCode::BAD_REQUEST, &localize("http.err_invalid_json"));
             }
             Err(_) => {
                 // 非 JSON 声明（如表单体）解析失败：交给 form 绑定，不提前判死。
@@ -276,8 +288,12 @@ async fn handle_request(
         }
     }
 
+    let per_req_ctx = match req_lang {
+        Some(l) => Arc::new(ctx.with_language(l.as_str())),
+        None => Arc::clone(ctx),
+    };
     let started = std::time::Instant::now();
-    let mut resp = match (entry.invoke)(ctx, &m) {
+    let mut resp = match (entry.invoke)(&per_req_ctx, &m) {
         Ok(out) => {
             let s = serde_json::to_string_pretty(&out).unwrap_or_else(|_| "null".to_string());
             json_response(StatusCode::OK, &s)
@@ -452,7 +468,13 @@ pub(crate) fn normalize_addr(addr: &str) -> String {
     addr.to_string()
 }
 
-pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
+pub(crate) fn serve(
+    ctx: &Ctx,
+    reg: &Registry,
+    args: &[String],
+    cfg: Config,
+    mount_mcp: bool,
+) -> i32 {
     let cfg = crate::builtins::parse_serve_args(args, cfg);
     let sctx = Arc::new(ctx.clone());
     let mut router = match router_with(
@@ -470,15 +492,17 @@ pub(crate) fn serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> 
     let mut mcp_note = String::new();
     #[cfg(feature = "mcp")]
     {
-        if let Some(m) = crate::mcp::mountable(
-            reg,
-            &crate::mcp::Options {
-                bearer_tokens: cfg.bearer_tokens.clone(),
-                default_ctx: Some(sctx.clone()),
-                defaults: cfg.channel_defaults.clone(),
-                ..Default::default()
-            },
-        ) {
+        if mount_mcp
+            && let Some(m) = crate::mcp::mountable(
+                reg,
+                &crate::mcp::Options {
+                    bearer_tokens: cfg.bearer_tokens.clone(),
+                    default_ctx: Some(sctx.clone()),
+                    defaults: cfg.channel_defaults.clone(),
+                    ..Default::default()
+                },
+            )
+        {
             router = router.nest_service("/mcp", m);
             mcp_note = " + /mcp".to_string();
         }

@@ -13,8 +13,12 @@ use crate::errors;
 /// 输出格式（spec §10.7）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Format {
-    /// 默认：§9.1 人类渲染。
+    /// TTY 感知默认（spec §10.7）：按 writer 是否交互解析为
+    /// format_interactive（默认 text）或 format_piped（默认 jsonl）。
+    /// resolve 之后不再出现在渲染路径上。
     #[default]
+    Auto,
+    /// §9.1 人类渲染。
     Text,
     /// pretty JSON（两空格缩进），裸值。
     Json,
@@ -28,7 +32,8 @@ impl Format {
     /// 解析 `--format` 取值（"" 视为 text）。
     pub fn parse(s: &str) -> Option<Format> {
         match s {
-            "" | "text" => Some(Format::Text),
+            "" | "auto" => Some(Format::Auto),
+            "text" => Some(Format::Text),
             "json" => Some(Format::Json),
             "jsonl" => Some(Format::JsonL),
             "markdown" => Some(Format::Markdown),
@@ -38,6 +43,7 @@ impl Format {
 
     pub fn as_str(&self) -> &'static str {
         match self {
+            Format::Auto => "auto",
             Format::Text => "text",
             Format::Json => "json",
             Format::JsonL => "jsonl",
@@ -46,8 +52,29 @@ impl Format {
     }
 
     /// 机器/备用格式（错误体走 §8.6 对象、绕过自定义渲染的判定用）。
+    /// auto 未解析时按非机器处理（解析后不会以 Auto 到达渲染层）。
     pub fn is_machine(&self) -> bool {
         matches!(self, Format::Json | Format::JsonL)
+    }
+
+    /// 解析 auto（spec §10.7）：interactive 时取 ifmt（空→text），否则取
+    /// pfmt（空→jsonl）；具体值直通。
+    pub fn resolve(self, interactive: bool, ifmt: &str, pfmt: &str) -> Format {
+        if !matches!(self, Format::Auto) {
+            return self;
+        }
+        let pick = if interactive {
+            if ifmt.is_empty() { "text" } else { ifmt }
+        } else if pfmt.is_empty() {
+            "jsonl"
+        } else {
+            pfmt
+        };
+        Format::parse(pick).unwrap_or(if interactive {
+            Format::Text
+        } else {
+            Format::JsonL
+        })
     }
 }
 
@@ -214,7 +241,8 @@ mod tests {
 
     #[test]
     fn format_parsing() {
-        assert_eq!(Format::parse(""), Some(Format::Text));
+        assert_eq!(Format::parse(""), Some(Format::Auto));
+        assert_eq!(Format::parse("auto"), Some(Format::Auto));
         assert_eq!(Format::parse("jsonl"), Some(Format::JsonL));
         assert_eq!(Format::parse("MARKDOWN"), None);
         assert!(Format::Json.is_machine() && !Format::Markdown.is_machine());

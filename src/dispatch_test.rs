@@ -27,6 +27,15 @@ fn test_reg(names: &[&str]) -> Registry {
     reg
 }
 
+fn test_words() -> crate::dispatch::Words {
+    crate::dispatch::Words {
+        serve: "serve".to_string(),
+        http: "http".to_string(),
+        mcp: "mcp".to_string(),
+        help: "help".to_string(),
+    }
+}
+
 fn args(v: &[&str]) -> Vec<String> {
     v.iter().map(|s| s.to_string()).collect()
 }
@@ -58,6 +67,7 @@ fn run_custom_mode_words() {
     let cfg = Config {
         modes: ModeWords {
             serve: "httpd".into(),
+            http: String::new(),
             mcp: "protocol".into(),
             help: "assist".into(),
         },
@@ -79,6 +89,7 @@ fn run_invalid_mode_words() {
         Config {
             modes: ModeWords {
                 serve: "serve".into(),
+                http: String::new(),
                 mcp: "serve".into(),
                 help: String::new(),
             },
@@ -87,6 +98,7 @@ fn run_invalid_mode_words() {
         Config {
             modes: ModeWords {
                 serve: "-serve".into(),
+                http: String::new(),
                 mcp: String::new(),
                 help: String::new(),
             },
@@ -95,6 +107,7 @@ fn run_invalid_mode_words() {
         Config {
             modes: ModeWords {
                 serve: "sv c".into(),
+                http: String::new(),
                 mcp: String::new(),
                 help: String::new(),
             },
@@ -106,9 +119,12 @@ fn run_invalid_mode_words() {
 }
 
 #[test]
-fn run_reserved_names() {
-    for name in ["serve.x", "mcp.up", "help.me"] {
-        assert_eq!(run(&test_reg(&[name]), args(&["whatever"])), 2);
+fn mode_words_are_no_longer_reserved() {
+    // spec §13.1（v0.4.4）：旧的硬保留已废除——顶层段撞模式词只是遮蔽
+    // （裸词让位给用户命令，xyz.<词> 仍达内建），注册不再报错。
+    for name in ["serve.x", "mcp.up", "help.me", "http.get"] {
+        let reg = Registry::new();
+        Command::new(name, th).register(&reg).unwrap();
     }
 }
 
@@ -240,8 +256,8 @@ fn lang_resolution_and_catalog() {
     crate::overview::print_overview(
         &mut buf,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "",
         "",
@@ -254,8 +270,8 @@ fn lang_resolution_and_catalog() {
     crate::overview::print_overview(
         &mut buf2,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "",
         "",
@@ -271,8 +287,8 @@ fn lang_resolution_and_catalog() {
     crate::overview::print_overview(
         &mut buf3,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "",
         "",
@@ -300,8 +316,8 @@ fn overview_help_blocks() {
     crate::overview::print_overview(
         &mut buf,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         before,
         after,
@@ -316,8 +332,8 @@ fn overview_help_blocks() {
     crate::overview::print_overview(
         &mut a,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "",
         "",
@@ -326,8 +342,8 @@ fn overview_help_blocks() {
     crate::overview::print_overview(
         &mut b,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "",
         "",
@@ -339,8 +355,8 @@ fn overview_help_blocks() {
     crate::overview::print_overview(
         &mut c,
         &Registry::new(),
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "",
         "tail",
@@ -352,8 +368,8 @@ fn overview_help_blocks() {
     crate::overview::print_overview(
         &mut d,
         &reg,
-        "serve",
-        "mcp",
+        &test_words(),
+        &Default::default(),
         Capabilities::default(),
         "a\nb\n\n\n",
         "",
@@ -386,4 +402,85 @@ fn parse_serve_args_bare_flags() {
     // 缺省地址
     let cfg2 = crate::builtins::parse_serve_args(&[], Config::default());
     assert_eq!(cfg2.addr, ":8080");
+}
+
+#[test]
+fn shadowing_modes_and_namespaced_reachability() {
+    // spec §13.1：顶层段等于模式词的用户命令不再注册期报错，而是遮蔽裸词；
+    // xyz.<词> 恒可达。
+    let reg = test_reg(&["serve.x", "mcp.y"]);
+    // 裸 serve → 用户命令（遮蔽生效；serve.x 执行成功）。
+    assert_eq!(
+        run_config(&reg, args(&["serve", "x"]), Config::default()),
+        0
+    );
+    // 裸 mcp 仍归内建模式（mcp.y 未注册？——测试注册了；此处应遮蔽）
+    assert_eq!(run_config(&reg, args(&["mcp", "y"]), Config::default()), 0);
+    // xyz.<词> 恒命中：模式帮助（不启动服务）。
+    assert_eq!(
+        run_config(&reg, args(&["xyz.serve", "-h"]), Config::default()),
+        0
+    );
+    assert_eq!(
+        run_config(&reg, args(&["xyz.mcp", "-h"]), Config::default()),
+        0
+    );
+    assert_eq!(
+        run_config(&reg, args(&["xyz.http", "-h"]), Config::default()),
+        0
+    );
+}
+
+#[test]
+fn cli_skipped_commands_do_not_shadow() {
+    // spec §13.1：CLI-Skip 的命令不参与遮蔽——裸 mcp 仍是内建模式。
+    let reg = Registry::new();
+    Command::new("mcp.hidden", th)
+        .cli(crate::spec::command::CliHints {
+            skip: true,
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    assert_eq!(run_config(&reg, args(&["mcp", "-h"]), Config::default()), 0);
+}
+
+#[test]
+fn help_subcommand_family() {
+    // spec §10.4/§13.2：help → 总览；help <模式> → 模式帮助（不启动）；
+    // help <命令路径>（点分或空格）→ 命令详细帮助。
+    let reg = test_reg(&["user.add", "search.query"]);
+    for argv in [
+        vec!["help"],
+        vec!["help", "serve"],
+        vec!["help", "http"],
+        vec!["help", "mcp"],
+        vec!["help", "user.add"],
+        vec!["help", "user", "add"],
+        vec!["help", "help"],
+    ] {
+        assert_eq!(
+            run_config(&reg, args(&argv), Config::default()),
+            0,
+            "help family: {argv:?}"
+        );
+    }
+}
+
+#[test]
+fn mode_help_does_not_start_servers() {
+    // serve/http/mcp 的 -h：打模式帮助 exit 0，不起服务。
+    let reg = test_reg(&["user.add"]);
+    for argv in [
+        vec!["serve", "-h"],
+        vec!["serve", "--help"],
+        vec!["http", "-h"],
+        vec!["mcp", "-h"],
+    ] {
+        assert_eq!(
+            run_config(&reg, args(&argv), Config::default()),
+            0,
+            "mode -h: {argv:?}"
+        );
+    }
 }

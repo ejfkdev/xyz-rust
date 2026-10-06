@@ -101,17 +101,13 @@ fn cli_known_top(reg: &Registry, first: &str) -> bool {
 }
 
 fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool) -> (i32, bool) {
-    let (serve, mcp_word, help_word) = match resolve_modes(&cfg) {
+    let words = match resolve_modes(&cfg) {
         Ok(m) => m,
         Err(e) => {
             eprintln!("{e}");
             return (2, true);
         }
     };
-    if let Err(e) = check_reserved(reg, &serve, &mcp_word, &help_word) {
-        eprintln!("{e}");
-        return (2, true);
-    }
     // 没有任何已注册命令：什么都不做，静默退出 0。
     if reg.names().is_empty() {
         return (0, true);
@@ -156,41 +152,73 @@ fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool
         resolved_lang,
         cfg.translations.get(resolved_lang.as_str()).cloned(),
     );
-    if args.is_empty() || args[0] == help_word || args[0] == "--help" || args[0] == "-h" {
+    // 遮蔽让位（spec §13.1）：顶层段等于模式词的用户命令让裸词改为路由到
+    // 用户命令；内建模式经 xyz.<词> 仍可达。
+    let shadowed = shadowed_modes(reg, &words);
+    // 总览触发（§13.2 第 4 步）：空参数 / 根 -h/--help。裸 help 词交给
+    // 模式匹配（被遮蔽时归用户命令）。
+    if args.is_empty() || args[0] == "--help" || args[0] == "-h" {
         let mut stdout = std::io::stdout();
         let _ = crate::overview::print_overview(
             &mut stdout,
             reg,
-            &serve,
-            &mcp_word,
+            &words,
+            &shadowed,
             cfg.capabilities,
             &cfg.help_before,
             &cfg.help_after,
         );
         return (0, true);
     }
-    // 优雅关停：信号取消的 ctx 贯穿 CLI/HTTP/MCP，长任务可在退出前排空。
-    let ctx = Ctx::new();
-    spawn_signal_watcher(ctx.clone());
-    crate::logx::debugf(format_args!(
-        "dispatch: mode word='{}' addr={} tokens={} timeout={:?} cors={}",
-        args[0],
-        cfg.addr,
-        cfg.bearer_tokens.len(),
-        cfg.timeout,
-        cfg.cors_origins.len()
-    ));
-    if args[0] == serve {
-        if cfg.capabilities.no_http {
-            crate::logx::warnf(format_args!(
-                "{}",
-                crate::lang::tf("warn.mode_disabled", &[&serve, "HTTP"])
-            ));
-            return (1, true);
+    // 模式派发：xyz.<词> 恒命中；裸词仅未被遮蔽时命中（§13.2 第 5 步）。
+    let kind = match_mode(&args[0], &words, &shadowed);
+    if kind != ModeKind::None {
+        let rest = &args[1..];
+        if kind == ModeKind::Help {
+            return (run_help(reg, rest, &words, &shadowed, cfg), true);
         }
-        return (run_serve(&ctx, reg, &args[1..], cfg), true);
-    }
-    if args[0] == mcp_word {
+        // serve/http/mcp 的 -h/--help：打印模式帮助而非起服务。
+        if has_help_flag(rest) {
+            return (print_mode_help(kind, &words), true);
+        }
+        // 优雅关停：信号取消的 ctx 贯穿 CLI/HTTP/MCP，长任务可在退出前排空。
+        let ctx = Ctx::new();
+        spawn_signal_watcher(ctx.clone());
+        crate::logx::debugf(format_args!(
+            "dispatch: mode word='{}' addr={} tokens={} timeout={:?} cors={}",
+            args[0],
+            cfg.addr,
+            cfg.bearer_tokens.len(),
+            cfg.timeout,
+            cfg.cors_origins.len()
+        ));
+        match kind {
+            ModeKind::Serve => {
+                if cfg.capabilities.no_http {
+                    crate::logx::warnf(format_args!(
+                        "{}",
+                        crate::lang::tf("warn.mode_disabled", &[&words.serve, "HTTP"])
+                    ));
+                    return (1, true);
+                }
+                // serve：REST + /openapi.json + 挂 /mcp（is_mcp 依 no_mcp 裁剪）。
+                let mount = !cfg.capabilities.no_mcp;
+                return (run_serve(&ctx, reg, rest, cfg, mount), true);
+            }
+            ModeKind::Http => {
+                if cfg.capabilities.no_http {
+                    crate::logx::warnf(format_args!(
+                        "{}",
+                        crate::lang::tf("warn.mode_disabled", &[&words.http, "HTTP"])
+                    ));
+                    return (1, true);
+                }
+                // http：仅 REST + /openapi.json，不挂 /mcp（spec §13.1）。
+                return (run_serve(&ctx, reg, rest, cfg, false), true);
+            }
+            _ => {}
+        }
+        let mcp_word = words.mcp.clone();
         if cfg.capabilities.no_mcp {
             crate::logx::warnf(format_args!(
                 "{}",
@@ -198,12 +226,12 @@ fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool
             ));
             return (1, true);
         }
-        return (run_mcp(&ctx, reg, &args[1..], cfg), true);
+        return (run_mcp(&ctx, reg, rest, cfg), true);
     }
     if cfg.capabilities.no_cli {
         crate::logx::warnf(format_args!(
             "{}",
-            crate::lang::tf("warn.no_cli", &[&mcp_word, &serve])
+            crate::lang::tf("warn.no_cli", &[&words.mcp, &words.serve])
         ));
         return (1, true);
     }
@@ -211,61 +239,212 @@ fn run_internal(reg: &Registry, args: Vec<String>, cfg: Config, composable: bool
         // 宿主兜底：静默交还，不做任何输出。
         return (0, false);
     }
+    let ctx = Ctx::new();
+    spawn_signal_watcher(ctx.clone());
     (run_cli(&ctx, reg, &args, &cfg), true)
 }
 
-/// resolveModes 默认并校验模式词：必须是无前导横线的普通词且两两不同。
-fn resolve_modes(cfg: &Config) -> errors::Result<(String, String, String)> {
-    let mut serve = cfg.modes.serve.clone();
-    let mut mcp_word = cfg.modes.mcp.clone();
-    let mut help_word = cfg.modes.help.clone();
-    if serve.is_empty() {
-        serve = "serve".to_string();
-    }
-    if mcp_word.is_empty() {
-        mcp_word = "mcp".to_string();
-    }
-    if help_word.is_empty() {
-        help_word = "help".to_string();
-    }
-    for w in [&serve, &mcp_word, &help_word] {
-        if w.starts_with('-') || w.chars().any(|c| c == ' ' || c == '\t') {
-            return Err(errors::Error::new(
-                errors::Kind::Internal,
-                format!("xyz: invalid mode word {w:?} (no leading dash, no whitespace)"),
-            ));
-        }
-    }
-    if serve == mcp_word || serve == help_word || mcp_word == help_word {
-        return Err(errors::Error::new(
-            errors::Kind::Internal,
-            format!(
-                "xyz: mode words must be pairwise distinct (serve={serve:?} mcp={mcp_word:?} help={help_word:?})"
-            ),
-        ));
-    }
-    Ok((serve, mcp_word, help_word))
+/// 解析后的四个模式词（spec §13.1）。
+pub struct Words {
+    pub(crate) serve: String,
+    pub(crate) http: String,
+    pub(crate) mcp: String,
+    pub(crate) help: String,
 }
 
-/// checkReserved 拒绝顶层段与模式词相撞的注册名（那些词归派发器）。
-fn check_reserved(
-    reg: &Registry,
-    serve: &str,
-    mcp_word: &str,
-    help_word: &str,
-) -> errors::Result<()> {
-    for name in reg.names() {
-        let top = name.split('.').next().unwrap_or("");
-        if top == serve || top == mcp_word || top == help_word {
+impl Words {
+    // （pub(crate)：overview 读取词面）
+    fn all(&self) -> [&str; 4] {
+        [
+            self.serve.as_str(),
+            self.http.as_str(),
+            self.mcp.as_str(),
+            self.help.as_str(),
+        ]
+    }
+}
+
+/// 命中的内建模式（spec §13.2 第 5 步）。
+#[derive(PartialEq, Eq, Clone, Copy)]
+enum ModeKind {
+    Serve,
+    Http,
+    Mcp,
+    Help,
+    None,
+}
+
+/// resolveModes 默认并校验模式词：必须是无前导横线的普通词且两两不同
+/// （四词：serve/http/mcp/help，spec §13.1）。
+fn resolve_modes(cfg: &Config) -> errors::Result<Words> {
+    let pick = |v: &str, dflt: &str| {
+        if v.is_empty() {
+            dflt.to_string()
+        } else {
+            v.to_string()
+        }
+    };
+    let w = Words {
+        serve: pick(&cfg.modes.serve, "serve"),
+        http: pick(&cfg.modes.http, "http"),
+        mcp: pick(&cfg.modes.mcp, "mcp"),
+        help: pick(&cfg.modes.help, "help"),
+    };
+    for word in w.all() {
+        if word.starts_with('-') || word.chars().any(|c| c == ' ' || c == '\t') {
             return Err(errors::Error::new(
                 errors::Kind::Internal,
-                format!(
-                    "xyz: command {name:?}: top-level name {top:?} is reserved for mode dispatch"
-                ),
+                format!("xyz: invalid mode word {word:?} (no leading dash, no whitespace)"),
             ));
         }
     }
-    Ok(())
+    let words = w.all();
+    for i in 0..words.len() {
+        for j in (i + 1)..words.len() {
+            if words[i] == words[j] {
+                return Err(errors::Error::new(
+                    errors::Kind::Internal,
+                    format!(
+                        "xyz: mode words must be pairwise distinct (serve={:?} http={:?} mcp={:?} help={:?})",
+                        w.serve, w.http, w.mcp, w.help
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(w)
+}
+
+/// 计算哪些模式词被用户命令的顶层段遮蔽（spec §13.1）：遮蔽时裸词让位给
+/// 用户命令，内建模式仅经 `xyz.<词>` 可达；CLI-Skip 的命令不参与遮蔽。
+fn shadowed_modes(reg: &Registry, w: &Words) -> std::collections::BTreeSet<String> {
+    let mut tops = std::collections::BTreeSet::new();
+    for name in reg.names() {
+        if let Some(e) = reg.get(&name)
+            && e.cli.skip
+        {
+            continue;
+        }
+        if let Some(top) = name.split('.').next() {
+            tops.insert(top.to_string());
+        }
+    }
+    w.all()
+        .iter()
+        .filter(|word| tops.contains(**word))
+        .map(|word| word.to_string())
+        .collect()
+}
+
+/// 首 token → 内建模式：`xyz.<词>` 恒命中；裸词仅在未被遮蔽时命中。
+fn match_mode(token: &str, w: &Words, shadowed: &std::collections::BTreeSet<String>) -> ModeKind {
+    if let Some(rest) = token.strip_prefix("xyz.") {
+        return match rest {
+            r if r == w.serve => ModeKind::Serve,
+            r if r == w.http => ModeKind::Http,
+            r if r == w.mcp => ModeKind::Mcp,
+            r if r == w.help => ModeKind::Help,
+            _ => ModeKind::None,
+        };
+    }
+    if shadowed.contains(token) {
+        return ModeKind::None;
+    }
+    match token {
+        t if t == w.serve => ModeKind::Serve,
+        t if t == w.http => ModeKind::Http,
+        t if t == w.mcp => ModeKind::Mcp,
+        t if t == w.help => ModeKind::Help,
+        _ => ModeKind::None,
+    }
+}
+
+/// args 中（"--" 之前）是否出现 -h/--help。
+fn has_help_flag(args: &[String]) -> bool {
+    for a in args {
+        if a == "--" {
+            break;
+        }
+        if a == "-h" || a == "--help" {
+            return true;
+        }
+    }
+    false
+}
+
+/// `help` 模式（spec §10.4/§13.2）：裸 help → 总览；help <模式> → 模式帮助；
+/// help <命令路径> → 该命令详细帮助（点分或空格分隔皆可，等同 `<path> -h`）。
+fn run_help(
+    reg: &Registry,
+    rest: &[String],
+    w: &Words,
+    shadowed: &std::collections::BTreeSet<String>,
+    cfg: Config,
+) -> i32 {
+    if rest.is_empty() {
+        let mut stdout = std::io::stdout();
+        let _ = crate::overview::print_overview(
+            &mut stdout,
+            reg,
+            w,
+            shadowed,
+            cfg.capabilities,
+            &cfg.help_before,
+            &cfg.help_after,
+        );
+        return 0;
+    }
+    let kind = match_mode(&rest[0], w, shadowed);
+    match kind {
+        ModeKind::Help | ModeKind::None if kind == ModeKind::Help => {
+            let mut stdout = std::io::stdout();
+            let _ = crate::overview::print_overview(
+                &mut stdout,
+                reg,
+                w,
+                shadowed,
+                cfg.capabilities,
+                &cfg.help_before,
+                &cfg.help_after,
+            );
+            0
+        }
+        ModeKind::Serve | ModeKind::Http | ModeKind::Mcp => print_mode_help(kind, w),
+        _ => {
+            // 命令路径：token 内的点再拆（help user.add == help user add）。
+            let mut path: Vec<String> = Vec::new();
+            for r in rest {
+                path.extend(r.split('.').map(|seg| seg.to_string()));
+            }
+            if cfg.capabilities.no_cli {
+                crate::logx::warnf(format_args!(
+                    "{}",
+                    crate::lang::tf("warn.no_cli", &[&w.mcp, &w.serve])
+                ));
+                return 1;
+            }
+            path.push("-h".to_string());
+            run_cli(&Ctx::new(), reg, &path, &cfg)
+        }
+    }
+}
+
+/// 打印某个模式的帮助（spec §10.4/§13.2），不起服务。
+fn print_mode_help(kind: ModeKind, w: &Words) -> i32 {
+    let key = match kind {
+        ModeKind::Serve => "mode_help.serve",
+        ModeKind::Http => "mode_help.http",
+        ModeKind::Mcp => "mode_help.mcp",
+        _ => "mode_help.help",
+    };
+    let word = match kind {
+        ModeKind::Serve => &w.serve,
+        ModeKind::Http => &w.http,
+        ModeKind::Mcp => &w.mcp,
+        _ => &w.help,
+    };
+    println!("{}", crate::lang::tf(key, &[word]));
+    0
 }
 
 /// 信号接线：可用 tokio 时走 tokio::signal；纯 CLI 构建走 ctrlc。
@@ -309,6 +488,9 @@ fn run_cli(ctx: &Ctx, reg: &Registry, args: &[String], cfg: &Config) -> i32 {
         args,
         crate::cli::Options {
             format: Some(cfg.format.clone()),
+            format_from_flag: cfg.format_from_flag,
+            format_interactive: Some(cfg.format_interactive.clone()),
+            format_piped: Some(cfg.format_piped.clone()),
             ..Default::default()
         },
     )
@@ -321,12 +503,12 @@ fn run_cli(_ctx: &Ctx, _reg: &Registry, _args: &[String], _cfg: &Config) -> i32 
 }
 
 #[cfg(feature = "http")]
-fn run_serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config) -> i32 {
-    crate::httpapi::serve(ctx, reg, args, cfg)
+fn run_serve(ctx: &Ctx, reg: &Registry, args: &[String], cfg: Config, mount_mcp: bool) -> i32 {
+    crate::httpapi::serve(ctx, reg, args, cfg, mount_mcp)
 }
 
 #[cfg(not(feature = "http"))]
-fn run_serve(_ctx: &Ctx, _reg: &Registry, _args: &[String], _cfg: Config) -> i32 {
+fn run_serve(_ctx: &Ctx, _reg: &Registry, _args: &[String], _cfg: Config, _mount_mcp: bool) -> i32 {
     eprintln!("xyz: {}", crate::lang::tf("stub.not_compiled", &["HTTP"]));
     1
 }
