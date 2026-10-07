@@ -103,16 +103,39 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
                     .unwrap_or_default(),
             )
         });
+        // spec §12.4：描述可经 MCPHints.description 覆写，否则 summary+
+        // description 合并；title 经 hints 或 title:… 注解写入
+        // annotations.title；hints.meta 并入工具的保留 _meta。
+        let desc = if e.mcp.description.is_empty() {
+            tool_description(&e)
+        } else {
+            e.mcp.description.clone()
+        };
         let mut tool = Tool::new_with_raw(
             tool_name(&e),
-            Some(std::borrow::Cow::Owned(tool_description(&e))),
+            Some(std::borrow::Cow::Owned(desc)),
             input_schema,
         );
         if let Some(out) = output_schema {
             tool = tool.with_raw_output_schema(out);
         }
-        if let Some(ann) = parse_annotations(&e) {
-            tool = tool.with_annotations(ann);
+        match parse_annotations(&e) {
+            Some(mut ann) => {
+                if !e.mcp.title.is_empty() {
+                    ann.title = Some(e.mcp.title.clone());
+                }
+                tool = tool.with_annotations(ann);
+            }
+            None => {
+                if !e.mcp.title.is_empty() {
+                    let mut ann = ToolAnnotations::default();
+                    ann.title = Some(e.mcp.title.clone());
+                    tool = tool.with_annotations(ann);
+                }
+            }
+        }
+        if !e.mcp.meta.is_empty() {
+            tool.meta = Some(MetaObject(e.mcp.meta.clone()));
         }
         tools.push(tool);
         by_name.insert(tool_name(&e), e);

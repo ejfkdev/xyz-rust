@@ -97,6 +97,13 @@ pub struct MCPHints {
     /// tools/list 通告与 tools/call 接受的唯一名字（CLI/HTTP 命名不动，
     /// 两通道前缀可各自独立）。须满足 §3.1 名字文法。
     pub name: String,
+    /// 工具描述覆写（spec §12.4）：空=summary+description 的 §3.3 合并。
+    pub description: String,
+    /// 人类友好显示名（spec §12.4）：写入 MCP 的 annotations.title；
+    /// 空=沿用 `title:…` 注解字符串（若有）。
+    pub title: String,
+    /// 任意工具级 `_meta` 键值（spec §12.4）：并入工具的保留 `_meta`。
+    pub meta: serde_json::Map<String, serde_json::Value>,
     /// 形如 "read"、"write"、"destructive"、"title:创建用户"。
     pub annotations: Vec<String>,
     /// 从 MCP 通道整体移除该命令：不成为工具。
@@ -109,6 +116,8 @@ pub struct MCPHints {
 #[derive(Debug, Clone, Default)]
 pub struct MCPFieldHint {
     pub default: Option<Value>,
+    /// 字段描述覆写（spec §12.4；空=沿用 desc）。
+    pub description: Option<String>,
 }
 
 /// Command 是一条命令的定义构造器。
@@ -465,6 +474,10 @@ pub fn apply_http_hint(f: &mut FieldMeta, key: &str, h: &HTTPFieldHint) -> error
 pub fn apply_mcp_hint(f: &mut FieldMeta, _key: &str, h: &MCPFieldHint) -> errors::Result<()> {
     if let Some(d) = &h.default {
         f.mcp.default = Some(d.clone());
+    }
+    if let Some(d) = &h.description {
+        // 在 build_schema 之前应用（entry() 顺序保证），覆写进 inputSchema。
+        f.description = d.clone();
     }
     Ok(())
 }

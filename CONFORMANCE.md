@@ -1,6 +1,6 @@
 # Conformance — xyz-rust
 
-Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.4.4**.
+Specification target: [xyz-spec](https://github.com/ejfkdev/xyz-spec) **v0.4.5**.
 
 Status: **conformant (baseline anchor)** — xyz-rust is one of the two
 reference implementations the specification was written from.
@@ -16,7 +16,7 @@ following evidence:
 
 | Evidence | Covers |
 |---|---|
-| `cargo test -p xyz-rust --lib` (112 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
+| `cargo test -p xyz-rust --lib` (121 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.88 | A.38–A.39 trim invariants |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
@@ -111,6 +111,24 @@ evidence that locks it:
 - **§14 item 7 environment context** — `xyz_rust::{language, interactive,
   no_color, env()}` + `EnvContext` + `language_from_ctx`. Evidence:
   `cli::cli_test::ctx_language_and_env_api`.
+
+## v0.4.5 additions
+
+- **§11.1 default GET+POST & multi-method routing** — a command with a path
+  and no method registers both GET and POST (GET binds query, POST body+query,
+  same handler); `Hints.Method` accepts a comma-separated list. Evidence:
+  `httpapi::httpapi_test::default_get_post_and_multi_method`.
+- **§11.3 rich OpenAPI** — per operation: summary + description; a
+  `parameters` entry for every path/query/header field (wire name, location,
+  correct `required` — path always true —, `desc`, and the rich per-field
+  schema with enum/default/format); requestBody for POST/PUT/PATCH; one
+  operation per registered method; `info.title`/`version` from the
+  application identity (§11.6 values, `example service`/`1` fallback).
+  Evidence: `httpapi::httpapi_test::openapi_is_rich`.
+- **§12.4 rich, overridable tool metadata** — `MCPHints.description/title/
+  meta` and `MCPFieldHint.description` (description merge stays the default;
+  title rides `annotations.title`; tool `_meta` merged verbatim). Evidence:
+  `mcp::mcp_test::tool_metadata_rich_overrides`.
 
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;

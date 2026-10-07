@@ -42,7 +42,14 @@ pub const MAX_BODY_BYTES: usize = 1 << 20;
 /// method+path 冲突是注册期错误（Go 用 recover 包 mux panic 转错误，
 /// 这里显式前置检查，行为等价）。
 pub fn router(reg: &Registry, ctx: Arc<Ctx>) -> errors::Result<Router> {
-    router_with(reg, ctx, std::collections::HashMap::new(), false)
+    router_with(
+        reg,
+        ctx,
+        std::collections::HashMap::new(),
+        false,
+        &crate::cli::bin_name(),
+        crate::version::version(),
+    )
 }
 
 /// 带通道级默认参数的路由器（serve --default k=v：缺席键补上）。
@@ -51,6 +58,8 @@ pub(crate) fn router_with(
     ctx: Arc<Ctx>,
     defaults: std::collections::HashMap<String, String>,
     no_server_headers: bool,
+    app_name: &str,
+    app_version: &str,
 ) -> errors::Result<Router> {
     let mut r: Router = Router::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
@@ -58,34 +67,54 @@ pub(crate) fn router_with(
         if e.http.skip || e.cli.daemon {
             continue; // 通道层面整体移除；daemon 只属于 CLI
         }
-        if e.http.method.is_empty() || e.http.path.is_empty() {
+        if e.http.path.is_empty() {
             continue; // 该命令没有声明 HTTP 路由（CLI/MCP 专用）
         }
-        if !seen.insert((e.http.method.clone(), e.http.path.clone())) {
-            return Err(errors::Error::new(
-                errors::Kind::Internal,
-                format!(
-                    "httpapi: route {:?} {:?} conflicts with an existing route",
-                    e.http.method, e.http.path
-                ),
-            ));
+        // 空 method = 同时注册 GET 与 POST（spec §11.1 默认；GET 绑 query、
+        // POST 绑 body+query，同一 handler）；method 可为逗号分隔多方法。
+        for method in http_methods(&e) {
+            if !seen.insert((method.clone(), e.http.path.clone())) {
+                return Err(errors::Error::new(
+                    errors::Kind::Internal,
+                    format!(
+                        "httpapi: route {:?} {:?} conflicts with an existing route",
+                        method, e.http.path
+                    ),
+                ));
+            }
+            let h = handle_entry_c(
+                e.clone(),
+                Arc::clone(&ctx),
+                Arc::new(defaults.clone()),
+                no_server_headers,
+            );
+            let mr = method_router(&method, h)?;
+            r = r.route(&e.http.path, mr);
         }
-        let h = handle_entry_c(
-            e.clone(),
-            Arc::clone(&ctx),
-            Arc::new(defaults.clone()),
-            no_server_headers,
-        );
-        let mr = method_router(&e.http.method, h)?;
-        r = r.route(&e.http.path, mr);
     }
     r = r
         .route("/healthz", get(healthz))
-        .route("/openapi.json", get(openapi::openapi_handler(reg)))
+        .route(
+            "/openapi.json",
+            get(openapi::openapi_handler(reg, app_name, app_version)),
+        )
         // 未匹配路由的统一 404（对齐 Go：{"error": <本地化 not found>}，
         // 遵循 §11.7 的逐请求语言）。
         .fallback(missing_route);
     Ok(r)
+}
+
+/// 命令的注册方法集（spec §11.1）：空 method → GET+POST 默认；否则按逗号
+/// 分隔（trim、忽略空项）。router 与 openapi 生成共用。
+pub(crate) fn http_methods(e: &crate::spec::Entry) -> Vec<String> {
+    let m = e.http.method.trim();
+    if m.is_empty() {
+        return vec!["GET".to_string(), "POST".to_string()];
+    }
+    m.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 /// 未匹配路由的 404：JSON 错误体 + 请求语言本地化。
@@ -499,6 +528,8 @@ pub(crate) fn serve(
         Arc::clone(&sctx),
         cfg.channel_defaults.clone(),
         cfg.no_server_headers,
+        &cfg.resolved_name(),
+        &cfg.resolved_version(),
     ) {
         Ok(r) => r,
         Err(e) => {

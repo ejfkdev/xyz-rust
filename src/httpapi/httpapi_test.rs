@@ -552,3 +552,148 @@ async fn missing_route_is_localized_json_404() {
     let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
     assert_eq!(v["error"], "未找到");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn default_get_post_and_multi_method() {
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct DArgs {
+        #[xyz(desc = "值")]
+        v: i64,
+    }
+    fn echo(_: &Ctx, a: &DArgs) -> errors::Result<i64> {
+        Ok(a.v)
+    }
+    let reg = Registry::new();
+    // 空 method → 默认 GET+POST（spec §11.1）。
+    Command::new("d.echo", echo)
+        .http(HTTPHints {
+            method: String::new(),
+            path: "/d/echo".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    // 逗号分隔多方法。
+    Command::new("d.multi", echo)
+        .http(HTTPHints {
+            method: "GET,POST,PUT".into(),
+            path: "/d/multi".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let router = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+
+    // 默认：GET（query）与 POST（body）都可达同一 handler。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/d/echo?v=7")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router.clone(), req).await;
+    assert_eq!(status, 200);
+    assert_eq!(out.trim(), "7");
+    let req = Request::builder()
+        .method("POST")
+        .uri("/d/echo")
+        .header("Content-Type", "application/json")
+        .body(Body::from("{\"v\":9}"))
+        .unwrap();
+    let (status, out) = call(router.clone(), req).await;
+    assert_eq!(status, 200);
+    assert_eq!(out.trim(), "9");
+
+    // 多方法：PUT 也可达（原只认单方法时会 405）。
+    for m in ["GET", "POST", "PUT"] {
+        let req = Request::builder()
+            .method(m)
+            .uri("/d/multi?v=1")
+            .body(Body::empty())
+            .unwrap();
+        let (status, _) = call(router.clone(), req).await;
+        assert_eq!(status, 200, "method {m}");
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn openapi_is_rich() {
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct RArgs {
+        #[xyz(desc = "目标名", required, http = "path")]
+        name: String,
+        #[xyz(desc = "模式", enum = "fast,slow", default = "fast", http = "query")]
+        mode: String,
+        #[xyz(desc = "令牌", http = "header", http_name = "X-Token")]
+        token: String,
+    }
+    fn get(_: &Ctx, a: &RArgs) -> errors::Result<String> {
+        Ok(a.name.clone())
+    }
+    let reg = Registry::new();
+    Command::new("r.get", get)
+        .summary("读取资源")
+        .description("更长的说明")
+        .http(HTTPHints {
+            method: String::new(),
+            path: "/r/{name}".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+
+    let doc_handler = crate::httpapi::openapi::openapi_handler(&reg, "appt", "9.9");
+    let router =
+        axum::routing::Router::new().route("/openapi.json", axum::routing::get(doc_handler));
+    let req = Request::builder()
+        .method("GET")
+        .uri("/openapi.json")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router, req).await;
+    assert_eq!(status, 200);
+    let doc: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+
+    // info 身份 = 应用身份（spec §11.3）。
+    assert_eq!(doc["info"]["title"], "appt");
+    assert_eq!(doc["info"]["version"], "9.9");
+
+    // 默认 GET+POST → 两个 operation；仅 post 带 requestBody。
+    let ops = &doc["paths"]["/r/{name}"];
+    assert!(ops["get"].is_object(), "{ops}");
+    assert!(ops["post"].is_object(), "{ops}");
+    assert!(ops["get"].get("requestBody").is_none());
+    assert!(ops["post"]["requestBody"]["content"]["application/json"]["schema"].is_object());
+    // summary + description。
+    assert_eq!(ops["get"]["summary"], "读取资源");
+    assert_eq!(ops["get"]["description"], "更长的说明");
+
+    // parameters：path 恒 required + query 富 schema（enum/default）+ header。
+    let params = ops["get"]["parameters"].as_array().unwrap();
+    let by = |name: &str| {
+        params
+            .iter()
+            .find(|p| p["name"] == name)
+            .unwrap_or_else(|| panic!("param {name} missing in {params:?}"))
+    };
+    let path_p = by("name");
+    assert_eq!(path_p["in"], "path");
+    assert_eq!(path_p["required"], true);
+    assert_eq!(path_p["description"], "目标名");
+    let mode_p = by("mode");
+    assert_eq!(mode_p["in"], "query");
+    assert_eq!(mode_p["schema"]["type"], "string");
+    assert_eq!(
+        mode_p["schema"]["enum"],
+        serde_json::json!(["fast", "slow"])
+    );
+    assert_eq!(mode_p["schema"]["default"], "fast");
+    let token_p = by("X-Token");
+    assert_eq!(token_p["in"], "header");
+    assert_eq!(token_p["description"], "令牌");
+}

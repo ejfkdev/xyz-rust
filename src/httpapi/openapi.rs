@@ -9,7 +9,6 @@ use serde_json::{Map, Value};
 
 use crate::errors;
 use crate::registry::Registry;
-use crate::spec::field::{FieldKind, FieldMeta};
 use std::sync::Arc;
 
 /// 与 EntryHandler 同路线的具名 handler：构建期快照文档。
@@ -23,33 +22,29 @@ impl axum::handler::Handler<(), ()> for OpenApiDoc {
     }
 }
 
-pub fn openapi_handler(reg: &Registry) -> OpenApiDoc {
-    OpenApiDoc(Arc::new(build_doc(reg)))
+pub fn openapi_handler(reg: &Registry, app_name: &str, app_version: &str) -> OpenApiDoc {
+    OpenApiDoc(Arc::new(build_doc(reg, app_name, app_version)))
 }
 
-fn build_doc(reg: &Registry) -> Value {
+fn build_doc(reg: &Registry, app_name: &str, app_version: &str) -> Value {
     let mut paths: Map<String, Value> = Map::new();
-    let mut order: Vec<String> = Vec::new();
+    // 每注册方法一个 operation（spec §11.3）：默认 GET+POST 的命令产出
+    // get 与 post 两条。
+    let mut order: Vec<(String, String, String)> = Vec::new();
     for e in reg.all() {
-        if e.http.skip || e.cli.daemon || e.http.method.is_empty() || e.http.path.is_empty() {
+        if e.http.skip || e.cli.daemon || e.http.path.is_empty() {
             continue;
         }
-        order.push(format!("{} {}", e.http.path, e.http.method));
+        for method in crate::httpapi::http_methods(&e) {
+            order.push((e.http.path.clone(), method, e.name.clone()));
+        }
     }
     order.sort();
-    for key in order {
-        let (path, method) = match key.rsplit_once(' ') {
-            Some((p, m)) => (p.to_string(), m.to_string()),
-            None => continue,
-        };
-        let Some(e) = reg
-            .all()
-            .into_iter()
-            .find(|e| e.http.path == path && e.http.method == method)
-        else {
+    for (path, method, name) in order {
+        let Some(e) = reg.all().into_iter().find(|e| e.name == name) else {
             continue;
         };
-        let op = build_operation(&e);
+        let op = build_operation(&e, &method);
         let path_obj = paths
             .entry(path)
             .or_insert_with(|| Value::Object(Map::new()));
@@ -59,29 +54,46 @@ fn build_doc(reg: &Registry) -> Value {
     }
     let mut doc = Map::new();
     doc.insert("openapi".to_string(), Value::String("3.0.3".to_string()));
+    // info 身份 = 应用身份（§11.6 同值）；解析不到时用参考回退。
     let mut info = Map::new();
-    info.insert(
-        "title".to_string(),
-        Value::String("example service".to_string()),
-    );
-    info.insert("version".to_string(), Value::String("1".to_string()));
+    let title = if app_name.is_empty() {
+        "example service".to_string()
+    } else {
+        app_name.to_string()
+    };
+    let version = if app_version.is_empty() {
+        "1".to_string()
+    } else {
+        app_version.to_string()
+    };
+    info.insert("title".to_string(), Value::String(title));
+    info.insert("version".to_string(), Value::String(version));
     doc.insert("info".to_string(), Value::Object(info));
     doc.insert("paths".to_string(), Value::Object(paths));
     Value::Object(doc)
 }
 
-fn build_operation(e: &crate::spec::Entry) -> Value {
+fn build_operation(e: &crate::spec::Entry, method: &str) -> Value {
     let mut op = Map::new();
     if !e.summary.is_empty() {
         op.insert("summary".to_string(), Value::String(e.summary.clone()));
     }
-    // 参数表：http:"path" 与 http:"query" 字段（Go openapi.go 同口径）。
+    if !e.description.is_empty() {
+        op.insert(
+            "description".to_string(),
+            Value::String(e.description.clone()),
+        );
+    }
+    // 参数表（spec §11.3）：每个 path/query/header 字段一条，带线上名、
+    // 位置、required（path 参数恒 true）、描述与富 schema（type + enum/
+    // default/format——与 MCP inputSchema 同源的逐字段 schema）。
     let mut params: Vec<Value> = Vec::new();
     for f in &e.root.children {
         if f.skip {
             continue;
         }
-        if f.http.location != "path" && f.http.location != "query" {
+        let location = f.http.location.as_str();
+        if location != "path" && location != "query" && location != "header" {
             continue;
         }
         let mut p = Map::new();
@@ -89,21 +101,26 @@ fn build_operation(e: &crate::spec::Entry) -> Value {
             "name".to_string(),
             Value::String(crate::httpapi::http_name(f).to_string()),
         );
-        p.insert("in".to_string(), Value::String(f.http.location.clone()));
-        p.insert("required".to_string(), Value::Bool(f.required));
-        let mut schema = Map::new();
-        schema.insert(
-            "type".to_string(),
-            Value::String(schema_type(f).to_string()),
+        p.insert("in".to_string(), Value::String(location.to_string()));
+        let required = if location == "path" { true } else { f.required };
+        p.insert("required".to_string(), Value::Bool(required));
+        if !f.description.is_empty() {
+            p.insert(
+                "description".to_string(),
+                Value::String(f.description.clone()),
+            );
+        }
+        p.insert(
+            "schema".to_string(),
+            crate::spec::schema::schema_to_value(&crate::spec::schema::field_schema(f)),
         );
-        p.insert("schema".to_string(), Value::Object(schema));
         params.push(Value::Object(p));
     }
     if !params.is_empty() {
         op.insert("parameters".to_string(), Value::Array(params));
     }
     // 请求体：POST/PUT/PATCH 以 inputSchema 为 schema。
-    if matches!(e.http.method.as_str(), "POST" | "PUT" | "PATCH") {
+    if matches!(method, "POST" | "PUT" | "PATCH") {
         let body = serde_json::json!({
             "content": {
                 "application/json": {
@@ -142,25 +159,6 @@ fn build_operation(e: &crate::spec::Entry) -> Value {
     );
     op.insert("responses".to_string(), Value::Object(responses));
     Value::Object(op)
-}
-
-/// Go openapi.go schemaType 对应物：基础 JSON 类型名。
-fn schema_type(f: &FieldMeta) -> &'static str {
-    match f.kind {
-        FieldKind::Bool => "boolean",
-        FieldKind::I8
-        | FieldKind::I16
-        | FieldKind::I32
-        | FieldKind::I64
-        | FieldKind::U8
-        | FieldKind::U16
-        | FieldKind::U32
-        | FieldKind::U64 => "integer",
-        FieldKind::F32 | FieldKind::F64 => "number",
-        FieldKind::Slice => "array",
-        FieldKind::Struct | FieldKind::Union => "object",
-        _ => "string", // String/Duration/Time/Bytes/Ptr
-    }
 }
 
 fn respond_doc(doc: &Arc<Value>) -> Response {

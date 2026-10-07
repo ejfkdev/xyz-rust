@@ -308,7 +308,7 @@ fn main() {
                 .mcp(MCPHints {
                     fields: HashMap::from([(
                         "k".to_string(),
-                        xyz_rust::MCPFieldHint { default: Some(15.into()) },
+                        xyz_rust::MCPFieldHint { default: Some(15.into()), description: None },
                     )]),
                     ..Default::default()
                 }),

@@ -40,12 +40,16 @@ fn reg() -> Registry {
         .description("两个整数相加")
         .mcp(MCPHints {
             name: String::new(),
+            description: String::new(),
+            title: "求和工具".into(),
+            meta: serde_json::Map::new(),
             skip: false,
             annotations: vec!["read".into(), "title:求和工具".into(), "destructive".into()],
             fields: std::collections::HashMap::from([(
                 "k".to_string(),
                 MCPFieldHint {
                     default: Some(15.into()),
+                    description: None,
                 },
             )]),
         })
@@ -341,4 +345,54 @@ fn rich_error_http_status_override() {
     let body = errors::error_body(&wrapped);
     assert_eq!(body.code, None); // 外层无 code；kind 取链上首个分类载体
     assert_eq!(body.kind, errors::Kind::Unavailable);
+}
+
+#[test]
+fn tool_metadata_rich_overrides() {
+    use crate::spec::command::{Command, MCPFieldHint, MCPHints};
+
+    #[derive(XyzArgs)]
+    struct RichArgs {
+        #[xyz(desc = "原描述")]
+        k: i32,
+    }
+    fn rich(_: &Ctx, _: &RichArgs) -> errors::Result<String> {
+        Ok("ok".into())
+    }
+    let reg = Registry::new();
+    let mut meta = serde_json::Map::new();
+    meta.insert("team".into(), serde_json::json!("core"));
+    Command::new("rich.tool", rich)
+        .summary("摘要")
+        .description("长描述")
+        .mcp(MCPHints {
+            name: String::new(),
+            description: "覆写描述".into(),
+            title: "人类标题".into(),
+            meta,
+            skip: false,
+            annotations: vec!["read".into()],
+            fields: std::collections::HashMap::from([(
+                "k".to_string(),
+                MCPFieldHint {
+                    default: None,
+                    description: Some("字段描述覆写".into()),
+                },
+            )]),
+        })
+        .register(&reg)
+        .unwrap();
+    let srv = handler::build(&reg, &Options::default(), Arc::new(Ctx::new())).unwrap();
+    let tool = srv.get_tool("rich.tool").unwrap();
+    // description 覆写（否则会是 "摘要\n\n长描述"）。
+    assert_eq!(tool.description.as_deref(), Some("覆写描述"));
+    // title 进 annotations.title（§12.4 载体）。
+    let ann = tool.annotations.as_ref().expect("annotations");
+    assert_eq!(ann.title.as_deref(), Some("人类标题"));
+    // 工具级 _meta。
+    let meta = tool.meta.as_ref().expect("tool _meta");
+    assert_eq!(meta.0["team"], "core");
+    // 字段描述覆写进 inputSchema（MCP 在 build_schema 前应用）。
+    let v: serde_json::Value = serde_json::to_value(&*tool.input_schema).unwrap();
+    assert_eq!(v["properties"]["k"]["description"], "字段描述覆写");
 }

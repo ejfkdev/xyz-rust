@@ -190,6 +190,7 @@ fn mcp_default_replaces_schema_default() {
         "k".to_string(),
         MCPFieldHint {
             default: Some(json!(15)),
+            description: None,
         },
     );
     let e = Command::new("t.mcp", mcp_h).mcp(mcp).entry().unwrap();
