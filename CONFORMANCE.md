@@ -16,7 +16,7 @@ following evidence:
 
 | Evidence | Covers |
 |---|---|
-| `cargo test -p xyz-rust --lib` (121 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
+| `cargo test -p xyz-rust --lib` (123 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.88 | A.38–A.39 trim invariants |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
@@ -124,6 +124,8 @@ evidence that locks it:
   schema with enum/default/format); requestBody for POST/PUT/PATCH; one
   operation per registered method; `info.title`/`version` from the
   application identity (§11.6 values, `example service`/`1` fallback).
+  Fields with no explicit `http` location are listed as `query` parameters,
+  matching the runtime binding (fix released to crates.io as 0.4.6).
   Evidence: `httpapi::httpapi_test::openapi_is_rich`.
 - **§12.4 rich, overridable tool metadata** — `MCPHints.description/title/
   meta` and `MCPFieldHint.description` (description merge stays the default;
