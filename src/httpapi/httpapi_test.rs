@@ -697,3 +697,53 @@ async fn openapi_is_rich() {
     assert_eq!(token_p["in"], "header");
     assert_eq!(token_p["description"], "令牌");
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn lowercase_methods_and_route_conflict_becomes_error() {
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct LArgs {
+        #[xyz(desc = "值")]
+        v: i64,
+    }
+    fn echo(_: &Ctx, a: &LArgs) -> errors::Result<i64> {
+        Ok(a.v)
+    }
+    // 小写方法名归一为大写（对齐 Go ToUpper）。
+    let reg = Registry::new();
+    Command::new("l.c", echo)
+        .http(HTTPHints {
+            method: "get".into(),
+            path: "/l/c".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+    let router = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/l/c?v=3")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(router, req).await;
+    assert_eq!(status, 200);
+    assert_eq!(out.trim(), "3");
+
+    // 占用内置路由（/healthz）→ 注册期错误而不是进程 panic。
+    let reg2 = Registry::new();
+    Command::new("bad.hz", echo)
+        .http(HTTPHints {
+            method: "GET".into(),
+            path: "/healthz".into(),
+            ..Default::default()
+        })
+        .register(&reg2)
+        .unwrap();
+    let err = httpapi::router(&reg2, Arc::new(Ctx::new())).unwrap_err();
+    assert!(
+        err.to_string().contains("conflict"),
+        "want conflict error, got: {err}"
+    );
+}

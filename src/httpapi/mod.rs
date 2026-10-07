@@ -61,6 +61,32 @@ pub(crate) fn router_with(
     app_name: &str,
     app_version: &str,
 ) -> errors::Result<Router> {
+    // 装配期 axum 可能因路由冲突 panic（例如用户命令占用 /healthz）——
+    // 捕获并转为注册期错误（对齐 Go registerSafe 的 recover）。
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        router_inner(reg, ctx, defaults, no_server_headers, app_name, app_version)
+    }))
+    .unwrap_or_else(|p| {
+        let msg = p
+            .downcast_ref::<&str>()
+            .map(|s| s.to_string())
+            .or_else(|| p.downcast_ref::<String>().cloned())
+            .unwrap_or_else(|| "route registration panic".to_string());
+        Err(errors::Error::new(
+            errors::Kind::Internal,
+            format!("httpapi: route conflicts with an existing route ({msg})"),
+        ))
+    })
+}
+
+fn router_inner(
+    reg: &Registry,
+    ctx: Arc<Ctx>,
+    defaults: std::collections::HashMap<String, String>,
+    no_server_headers: bool,
+    app_name: &str,
+    app_version: &str,
+) -> errors::Result<Router> {
     let mut r: Router = Router::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
     for e in reg.all() {
@@ -111,8 +137,9 @@ pub(crate) fn http_methods(e: &crate::spec::Entry) -> Vec<String> {
     if m.is_empty() {
         return vec!["GET".to_string(), "POST".to_string()];
     }
+    // 逗号分隔、大小写归一为大写（对齐 Go httpMethods 的 ToUpper）。
     m.split(',')
-        .map(|s| s.trim().to_string())
+        .map(|s| s.trim().to_uppercase())
         .filter(|s| !s.is_empty())
         .collect()
 }
