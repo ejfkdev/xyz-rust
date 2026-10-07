@@ -631,6 +631,10 @@ async fn openapi_is_rich() {
         mode: String,
         #[xyz(desc = "令牌", http = "header", http_name = "X-Token")]
         token: String,
+        // 未标注 http location：运行期按 query 绑定，文档必须同口径
+        // 收录（否则 openapi.json 漏掉全部默认字段）。
+        #[xyz(desc = "数量上限", default = "10")]
+        limit: i32,
     }
     fn get(_: &Ctx, a: &RArgs) -> errors::Result<String> {
         Ok(a.name.clone())
@@ -693,6 +697,11 @@ async fn openapi_is_rich() {
         serde_json::json!(["fast", "slow"])
     );
     assert_eq!(mode_p["schema"]["default"], "fast");
+    // 未标注字段：文档位置 = query（与运行期绑定同口径）。
+    let limit_p = by("limit");
+    assert_eq!(limit_p["in"], "query");
+    assert_eq!(limit_p["schema"]["type"], "integer");
+    assert_eq!(limit_p["schema"]["default"], 10);
     let token_p = by("X-Token");
     assert_eq!(token_p["in"], "header");
     assert_eq!(token_p["description"], "令牌");

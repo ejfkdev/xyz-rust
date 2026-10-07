@@ -87,12 +87,19 @@ fn build_operation(e: &crate::spec::Entry, method: &str) -> Value {
     // 参数表（spec §11.3）：每个 path/query/header 字段一条，带线上名、
     // 位置、required（path 参数恒 true）、描述与富 schema（type + enum/
     // default/format——与 MCP inputSchema 同源的逐字段 schema）。
+    // 未标注 location 的字段运行期按 query 绑定（httpapi/mod.rs 的
+    // ""|"query" 臂），文档同口径收录，否则 openapi.json 漏掉全部默认
+    // 字段（框架使用者几乎都不逐字段标注）。
     let mut params: Vec<Value> = Vec::new();
     for f in &e.root.children {
         if f.skip {
             continue;
         }
-        let location = f.http.location.as_str();
+        let location = if f.http.location.is_empty() {
+            "query"
+        } else {
+            f.http.location.as_str()
+        };
         if location != "path" && location != "query" && location != "header" {
             continue;
         }
