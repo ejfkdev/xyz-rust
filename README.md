@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/xyz-rust.svg?style=flat)](https://crates.io/crates/xyz-rust)
 [![docs.rs](https://img.shields.io/docsrs/xyz-rust?style=flat)](https://docs.rs/xyz-rust)
-[![Rust](https://img.shields.io/badge/Rust-1.88%2B-orange?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange?style=flat&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![MCP Protocol](https://img.shields.io/badge/MCP-2024%E2%80%932026--07--28-0764e0?style=flat)](https://modelcontextprotocol.io/specification/2026-07-28)
 [![Dependencies](https://img.shields.io/badge/core-std_%2B_serde%2Fchrono-2ea44f?style=flat)](#dependency-policy--binary-size)
 [![中文](https://img.shields.io/badge/中文-README.zh--CN.md-red?style=flat)](README.zh-CN.md)
@@ -77,7 +77,7 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP: every command becomes 
 cargo add xyz-rust        # the crate name is xyz-rust — on crates.io `xyz` was already taken by an unrelated project
 ```
 
-Import as `use xyz_rust::...`. Published on crates.io as `xyz-rust` (current 0.4.x line); the bundled examples run from this repository as path dependencies. Requires **Rust 1.88+** (MSRV, dictated by the official Rust SDK rmcp 3.5.1's `rust-version`) and edition 2024. A complete runnable showcase lives in [examples/example](examples/example/src/main.rs) (crate `xyz-example`, 11 commands covering the full API surface); [examples/tour](examples/tour/src/main.rs) (`xyz-tour`) walks through the internals, and [examples/clap](examples/clap/src/main.rs) (`xyz-clap`) shows coexistence with an existing clap app. The compile-time derive macros live in the companion crate `xyz-rust-macros`, pulled in automatically by `xyz-rust`.
+Import as `use xyz_rust::...`. Published on crates.io as `xyz-rust` (current 0.4.x line); the bundled examples run from this repository as path dependencies. Requires **Rust 1.89+** (MSRV: the official Rust SDK rmcp 3.5.1 brings `uuid` 1.28, whose floor is 1.89) and edition 2024. A complete runnable showcase lives in [examples/example](examples/example/src/main.rs) (crate `xyz-example`, 11 commands covering the full API surface); [examples/tour](examples/tour/src/main.rs) (`xyz-tour`) walks through the internals, and [examples/clap](examples/clap/src/main.rs) (`xyz-clap`) shows coexistence with an existing clap app. The compile-time derive macros live in the companion crate `xyz-rust-macros`, pulled in automatically by `xyz-rust`.
 
 ## One definition: the argument struct
 

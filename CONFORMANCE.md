@@ -17,7 +17,7 @@ following evidence:
 | Evidence | Covers |
 |---|---|
 | `cargo test -p xyz-rust --lib` (123 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
-| `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.88 | A.38–A.39 trim invariants |
+| `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.89 | A.38–A.39 trim invariants |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
 
