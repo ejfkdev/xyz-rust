@@ -136,6 +136,11 @@ fn impl_defaults() {
     let info = srv.get_info();
     assert_eq!(info.server_info.name, crate::cli::app::bin_name());
     assert_eq!(info.server_info.version, "0.0.0");
+    // initialize 必须声明 tools 能力（MCP MUST），否则按能力协商的客户端
+    // 不发 tools/list；工具集固定、不发 list_changed，故线上形状为
+    // {"tools":{}}。
+    let caps = serde_json::to_value(&info.capabilities).unwrap();
+    assert_eq!(caps, serde_json::json!({ "tools": {} }));
 }
 
 #[test]

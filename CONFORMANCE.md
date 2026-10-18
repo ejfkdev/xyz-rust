@@ -125,12 +125,22 @@ evidence that locks it:
   operation per registered method; `info.title`/`version` from the
   application identity (§11.6 values, `example service`/`1` fallback).
   Fields with no explicit `http` location are listed as `query` parameters,
-  matching the runtime binding (fix released to crates.io as 0.4.6).
+  matching the runtime binding.
   Evidence: `httpapi::httpapi_test::openapi_is_rich`.
 - **§12.4 rich, overridable tool metadata** — `MCPHints.description/title/
   meta` and `MCPFieldHint.description` (description merge stays the default;
   title rides `annotations.title`; tool `_meta` merged verbatim). Evidence:
   `mcp::mcp_test::tool_metadata_rich_overrides`.
+
+## Fix releases
+
+- **0.4.6** — `/openapi.json` parameters now include fields with no explicit
+  `http` location (as `query`, matching the runtime binding).
+- **0.4.7** — `initialize` declares the MCP tools capability
+  (`"capabilities":{"tools":{}}`), so capability-negotiating clients send
+  `tools/list`; `listChanged` is deliberately not claimed (the tool set is
+  built once and no change notifications are ever emitted). Evidence:
+  `mcp::mcp_test::impl_defaults` pins the wire shape.
 
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;
