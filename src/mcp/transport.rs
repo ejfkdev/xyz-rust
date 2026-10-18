@@ -159,7 +159,14 @@ fn serve_http(opts: &Options, server: &XyzServer) -> i32 {
             let router = router.clone();
             let handle = handle.clone();
             tokio::spawn(async move {
-                let _ = axum_server::from_tcp(listener.into_std().unwrap())
+                let server = match axum_server::from_tcp(listener.into_std().unwrap()) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        crate::logx::errorf(format_args!("{e}"));
+                        return 1;
+                    }
+                };
+                let _ = server
                     .handle(handle)
                     .serve(router.into_make_service())
                     .await;

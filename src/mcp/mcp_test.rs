@@ -141,6 +141,9 @@ fn impl_defaults() {
     // {"tools":{}}。
     let caps = serde_json::to_value(&info.capabilities).unwrap();
     assert_eq!(caps, serde_json::json!({ "tools": {} }));
+    // 声明的协议版本必须是仍带 initialize 握手的修订（2026-07-28 起
+    // LATEST 属无握手世代，不能出现在 initialize 结果里）。
+    assert!(info.protocol_version.has_initialize());
 }
 
 #[test]

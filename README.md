@@ -77,7 +77,7 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP: every command becomes 
 cargo add xyz-rust        # the crate name is xyz-rust — on crates.io `xyz` was already taken by an unrelated project
 ```
 
-Import as `use xyz_rust::...`. The crate is not published yet; until the first release it lives at the repository root (a path dependency). Requires **Rust 1.88+** (MSRV, dictated by the official Rust SDK rmcp 3.1.4's `rust-version`) and edition 2024. A complete runnable showcase lives in [examples/example](examples/example/src/main.rs) (crate `xyz-example`, 11 commands covering the full API surface); [examples/tour](examples/tour/src/main.rs) (`xyz-tour`) walks through the internals, and [examples/clap](examples/clap/src/main.rs) (`xyz-clap`) shows coexistence with an existing clap app. The compile-time derive macros live in the companion crate `xyz-rust-macros`, pulled in automatically by `xyz-rust`.
+Import as `use xyz_rust::...`. Published on crates.io as `xyz-rust` (current 0.4.x line); the bundled examples run from this repository as path dependencies. Requires **Rust 1.88+** (MSRV, dictated by the official Rust SDK rmcp 3.5.1's `rust-version`) and edition 2024. A complete runnable showcase lives in [examples/example](examples/example/src/main.rs) (crate `xyz-example`, 11 commands covering the full API surface); [examples/tour](examples/tour/src/main.rs) (`xyz-tour`) walks through the internals, and [examples/clap](examples/clap/src/main.rs) (`xyz-clap`) shows coexistence with an existing clap app. The compile-time derive macros live in the companion crate `xyz-rust-macros`, pulled in automatically by `xyz-rust`.
 
 ## One definition: the argument struct
 
@@ -428,8 +428,8 @@ Already on clap / axum? See the [migration guide](docs/adapters.md) with a runna
 
 ## Differences from the Go implementation
 
-1. **No SSE transport.** The official Rust SDK (rmcp 3.1.4) removed the HTTP+SSE transport with the 2026-07-28 revision, so `mcp sse` is parsed but answered with a clear error and exit code 2. Available transports: `stdio` and streamable `http`.
-2. **serde enters the core.** Rust's std has no JSON, so the core (spec / registry / errors / cli / logx / root) depends on serde + serde_json — the "missing standard library" — and chrono (time types), and nothing else. `httpapi` sits on axum (the de-facto standard HTTP stack in Rust, the same stack the official rmcp streamable-HTTP examples use), and `mcp` on the official Rust SDK `rmcp` pinned to `=3.1.4` — the only other direct third-party dependency tree. `http` and `mcp` share the tokio+axum cluster behind the internal `http-stack` feature.
+1. **No SSE transport.** The official Rust SDK (rmcp 3.5.1) removed the HTTP+SSE transport with the 2026-07-28 revision, so `mcp sse` is parsed but answered with a clear error and exit code 2. Available transports: `stdio` and streamable `http`.
+2. **serde enters the core.** Rust's std has no JSON, so the core (spec / registry / errors / cli / logx / root) depends on serde + serde_json — the "missing standard library" — and chrono (time types), and nothing else. `httpapi` sits on axum (the de-facto standard HTTP stack in Rust, the same stack the official rmcp streamable-HTTP examples use), and `mcp` on the official Rust SDK `rmcp` pinned to `=3.5.1` — the only other direct third-party dependency tree. `http` and `mcp` share the tokio+axum cluster behind the internal `http-stack` feature.
 3. **No reflection.** What Go derives at runtime from struct tags is generated at compile time by the derive macros. The attribute vocabulary is `#[xyz(desc="...", name="w", required, secret, skip, validate="min=2,email", default="18", enum="a,b", cli="positional"/"shorthand=a,env=X"/"hidden"/"-", http="query|path|header|form|body", http_name="X-Key")]` — one-to-one with the Go tags, plus the serde `rename` fallback and `rename_all` support. Named scalar newtypes derive `XyzField`; result structs derive `Serialize` + `XyzOutput` with wire names following serde conventions, or no derive at all — a `XyzArgs` input struct automatically provides `XyzSchema`.
 4. **Handler shape.** `fn(handler(_: &Ctx, _: &Args) -> Result<Resp, E>)` with `E: std::error::Error` (classification on the error chain is preserved) and `R: Serialize`. `define("name", h)` is fully inferred — no Go-style explicit `Define[T, R]` generics.
 5. **Result rendering.** Structs and maps are the same shape: both become a `serde_json::Value` after serialization, and `preserve_order` keeps declaration order (Go sorts map keys); a `Vec<u8>` result type gets an array-shaped output schema (its input side is still `string`); `std::time::Duration` has no negative-value support (Rust semantics); `oneof` has no `%v` form for structs; in `--format markdown` a struct and a map are indistinguishable after serialization, so both use the `| Field | Value |` header (Go uses `| Key | Value |` for maps).
@@ -442,17 +442,17 @@ All of the above are filed, with spec-section references, in the spec repository
 
 ## Dependency policy & binary size
 
-- **Serde-family-only core**: the core modules have zero third-party dependencies beyond serde, serde_json and chrono; the CLI frontend is std + serde (ctrlc only for signals in non-HTTP builds); `httpapi` needs the axum cluster (`http-stack`: tokio, axum, axum-server, tower-http, rustls); the only third-party tree on top is the official `rmcp` (pinned `=3.1.4`, shared by `mcp`).
+- **Serde-family-only core**: the core modules have zero third-party dependencies beyond serde, serde_json and chrono; the CLI frontend is std + serde (ctrlc only for signals in non-HTTP builds); `httpapi` needs the axum cluster (`http-stack`: tokio, axum, axum-server, tower-http, rustls; TLS runs on the `ring` provider — axum-server is built with `tls-rustls-no-provider` and `ring` is installed explicitly at startup, so an embedding graph that also carries `aws-lc-rs` stays deterministic); the only third-party tree on top is the official `rmcp` (pinned `=3.5.1`, shared by `mcp`).
 - **Trim any channel via Cargo features** (any combination):
 
 | Features | Channels | Size (macOS arm64, `cargo build --release` + strip, `xyz-example`) |
 |---|---|---|
-| default (`cli,http,mcp`) | CLI + HTTP + MCP | 6.6M |
-| `--no-default-features --features cli,http` | CLI + HTTP | 3.4M |
-| `--no-default-features --features http,mcp` | HTTP + MCP | 6.5M |
-| `--no-default-features --features cli,mcp` | CLI + MCP | 5.7M |
-| `--no-default-features --features cli` | CLI only | 0.95M |
-| `--no-default-features` | embedding only | 0.81M |
+| default (`cli,http,mcp`) | CLI + HTTP + MCP | 7.9M |
+| `--no-default-features --features cli,http` | CLI + HTTP | 4.3M |
+| `--no-default-features --features http,mcp` | HTTP + MCP | 7.8M |
+| `--no-default-features --features cli,mcp` | CLI + MCP | 6.4M |
+| `--no-default-features --features cli` | CLI only | 1.1M |
+| `--no-default-features` | embedding only | 0.95M |
 
 ```bash
 cargo build --release
@@ -461,7 +461,7 @@ cargo build --release --no-default-features                  # embedding only
 strip target/release/xyz-example
 ```
 
-For reference, the same showcase in Go measures 8.3M / 6.5M / 8.3M / 7.9M / 4.1M / 3.9M — Rust comes out smaller because there is no Go runtime floor: every Go binary pays ≈1.1M just for the runtime, while a Rust binary starts from the library itself. The trimmed channel disappears as a block; invoking a channel that was not compiled in answers a clear error and exits 1.
+For reference, the same showcase in Go measures 9.4M / 7.6M / 9.4M / 8.8M / 5.1M / 4.4M (`go build -ldflags="-s -w"` + strip) — Rust comes out smaller because there is no Go runtime floor: every Go binary pays ≈1.1M just for the runtime, while a Rust binary starts from the library itself. The trimmed channel disappears as a block; invoking a channel that was not compiled in answers a clear error and exits 1.
 
 ## Module layout
 

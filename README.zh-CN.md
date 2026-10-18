@@ -78,7 +78,7 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP：注册的命令即工
 cargo add xyz-rust        # crate 名是 xyz-rust——crates.io 上 `xyz` 已被无关项目占用
 ```
 
-导入形式 `use xyz_rust::...`。本机未发布前 crate 在仓库根（path 依赖）。要求 **Rust 1.88+**（MSRV，跟随官方 Rust SDK rmcp 3.1.4 的 `rust-version`），edition 2024。完整可运行示例见 [examples/example](examples/example/src/main.rs)（crate 名 `xyz-example`，11 条命令覆盖全部常用写法），内部机制导览见 [examples/tour](examples/tour/src/main.rs)（`xyz-tour`），与已有 clap 工程共存见 [examples/clap](examples/clap/src/main.rs)（`xyz-clap`）。编译期派生宏在附属 crate `xyz-rust-macros` 中，由 `xyz-rust` 自动引入。
+导入形式 `use xyz_rust::...`。已发布到 crates.io（`xyz-rust`，当前 0.4.x 线）；仓库内示例以 path 依赖直接可跑。要求 **Rust 1.88+**（MSRV，跟随官方 Rust SDK rmcp 3.5.1 的 `rust-version`），edition 2024。完整可运行示例见 [examples/example](examples/example/src/main.rs)（crate 名 `xyz-example`，11 条命令覆盖全部常用写法），内部机制导览见 [examples/tour](examples/tour/src/main.rs)（`xyz-tour`），与已有 clap 工程共存见 [examples/clap](examples/clap/src/main.rs)（`xyz-clap`）。编译期派生宏在附属 crate `xyz-rust-macros` 中，由 `xyz-rust` 自动引入。
 
 ## 一次定义：入参 struct 与全局契约
 
@@ -407,8 +407,8 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 
 ## 与 Go 版差异
 
-1. **sse 传输不存在**：官方 Rust SDK（rmcp 3.1.4）随 2026-07-28 修订移除了 HTTP+SSE 传输，`mcp sse` 可被解析但以清晰错误应答、退出码 2。可用传输：`stdio` 与流式 `http`。
-2. **serde 进核心**：Rust std 无 JSON，核心（spec / registry / errors / cli / logx / 根）除 serde + serde_json（「缺位标准库」）外零第三方依赖；chrono 同为核心依赖（时间类型）。`httpapi` 基于 axum（Rust 生态事实标准 HTTP 栈，官方 rmcp 的 streamable-HTTP 示例同栈），`mcp` 基于官方 Rust SDK `rmcp`（钉定 `=3.1.4`）——唯一另一边直接第三方依赖树。`http` 与 `mcp` 共享 tokio+axum 依赖簇（内部 feature `http-stack`）。
+1. **sse 传输不存在**：官方 Rust SDK（rmcp 3.5.1）随 2026-07-28 修订移除了 HTTP+SSE 传输，`mcp sse` 可被解析但以清晰错误应答、退出码 2。可用传输：`stdio` 与流式 `http`。
+2. **serde 进核心**：Rust std 无 JSON，核心（spec / registry / errors / cli / logx / 根）除 serde + serde_json（「缺位标准库」）外零第三方依赖；chrono 同为核心依赖（时间类型）。`httpapi` 基于 axum（Rust 生态事实标准 HTTP 栈，官方 rmcp 的 streamable-HTTP 示例同栈），`mcp` 基于官方 Rust SDK `rmcp`（钉定 `=3.5.1`）——唯一另一边直接第三方依赖树。`http` 与 `mcp` 共享 tokio+axum 依赖簇（内部 feature `http-stack`）。
 3. **无反射**：Go 侧靠 struct tag 反射在运行时做的事，Rust 全部由派生宏编译期生成。属性词汇 `#[xyz(desc="...", name="w", required, secret, skip, validate="min=2,email", default="18", enum="a,b", cli="positional"/"shorthand=a,env=X"/"hidden"/"-", http="query|path|header|form|body", http_name="X-Key")]` 与 Go 的 tag 逐一对应，另支持 serde `rename` 回退与 `rename_all`；命名标量 newtype 用 `#[derive(XyzField)]`；结果 struct 用 `#[derive(Serialize, XyzOutput)]`（wire 名走 serde 惯例），也可不 derive——`XyzArgs` 入参 struct 自动获得 `XyzSchema`。
 4. **Handler 形态**：`fn(handler(_: &Ctx, _: &Args) -> Result<Resp, E>)`，`E: std::error::Error`（错误链上的分类被保留），`R: Serialize`。`define("name", h)` 全类型推断，无 Go 的 `Define[T,R]` 显式泛型。
 5. **结果渲染**：struct 与 map 同形——都先经 serde_json 序列化成 `Value`，`preserve_order` 保留声明序（Go 的 map 按键排序）；`Vec<u8>` 作为结果类型的输出 schema 是数组形（输入侧仍是 string）；`std::time::Duration` 负值不支持（Rust 语义）；oneof 对 struct 无 `%v` 形态；`--format markdown` 下 struct 与 map 序列化后同形，统一用 `| Field | Value |` 表头（Go 的 map 用 `| Key | Value |`）。
@@ -424,17 +424,17 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 
 ## 依赖原则与体积
 
-- **核心只认 serde 家族**：核心模块除 serde、serde_json、chrono 外零第三方依赖；CLI 前端是 std + serde（无 HTTP 构建下信号只用 ctrlc）；`httpapi` 需要 axum 簇（`http-stack`：tokio、axum、axum-server、tower-http、rustls）；其上唯一的第三方树是官方 `rmcp`（钉定 `=3.1.4`，与 `mcp` 共享）。
+- **核心只认 serde 家族**：核心模块除 serde、serde_json、chrono 外零第三方依赖；CLI 前端是 std + serde（无 HTTP 构建下信号只用 ctrlc）；`httpapi` 需要 axum 簇（`http-stack`：tokio、axum、axum-server、tower-http、rustls；TLS 走 rustls 的 `ring` provider——axum-server 以 `tls-rustls-no-provider` 构建、启动时显式安装 ring，嵌入方的依赖图即使同时带 `aws-lc-rs` 也保持确定性）；其上唯一的第三方树是官方 `rmcp`（钉定 `=3.5.1`，与 `mcp` 共享）。
 - **Cargo features 自由裁剪**（任意组合）：
 
 | Features | 通道 | 体积（macOS arm64，`cargo build --release` + strip，`xyz-example` 实测） |
 |---|---|---|
-| 默认（`cli,http,mcp`） | CLI + HTTP + MCP | 6.6M |
-| `--no-default-features --features cli,http` | CLI + HTTP | 3.4M |
-| `--no-default-features --features http,mcp` | HTTP + MCP | 6.5M |
-| `--no-default-features --features cli,mcp` | CLI + MCP | 5.7M |
-| `--no-default-features --features cli` | 仅 CLI | 0.95M |
-| `--no-default-features` | 纯嵌入 | 0.81M |
+| 默认（`cli,http,mcp`） | CLI + HTTP + MCP | 7.9M |
+| `--no-default-features --features cli,http` | CLI + HTTP | 4.3M |
+| `--no-default-features --features http,mcp` | HTTP + MCP | 7.8M |
+| `--no-default-features --features cli,mcp` | CLI + MCP | 6.4M |
+| `--no-default-features --features cli` | 仅 CLI | 1.1M |
+| `--no-default-features` | 纯嵌入 | 0.95M |
 
 ```bash
 cargo build --release
@@ -443,7 +443,7 @@ cargo build --release --no-default-features                  # 纯嵌入
 strip target/release/xyz-example
 ```
 
-对照：同一示例在 Go 下是 8.3M / 6.5M / 8.3M / 7.9M / 4.1M / 3.9M——Rust 更小来自没有 Go runtime 底：任何 Go 程序都要付 ≈1.1M 的运行时地板，Rust 二进制从库本体起步。裁剪掉的通道对应整块移除；调用未编译进二进制的通道会明确报错并退出 1。
+对照：同一示例在 Go 下是 9.4M / 7.6M / 9.4M / 8.8M / 5.1M / 4.4M（`go build -ldflags="-s -w"` + strip）——Rust 更小来自没有 Go runtime 底：任何 Go 程序都要付 ≈1.1M 的运行时地板，Rust 二进制从库本体起步。裁剪掉的通道对应整块移除；调用未编译进二进制的通道会明确报错并退出 1。
 
 ## 项目结构
 

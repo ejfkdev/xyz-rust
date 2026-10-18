@@ -652,12 +652,29 @@ pub(crate) fn serve(
                     let rustls_cfg = axum_server::tls_rustls::RustlsConfig::from_config(
                         std::sync::Arc::new(tls_config),
                     );
-                    let _ = axum_server::from_tcp_rustls(listener.into_std().unwrap(), rustls_cfg)
+                    let server = match axum_server::from_tcp_rustls(
+                        listener.into_std().unwrap(),
+                        rustls_cfg,
+                    ) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            crate::logx::errorf(format_args!("{e}"));
+                            return 1;
+                        }
+                    };
+                    let _ = server
                         .handle(handle.clone())
                         .serve(router.clone().into_make_service())
                         .await;
                 } else {
-                    let _ = axum_server::from_tcp(listener.into_std().unwrap())
+                    let server = match axum_server::from_tcp(listener.into_std().unwrap()) {
+                        Ok(s) => s,
+                        Err(e) => {
+                            crate::logx::errorf(format_args!("{e}"));
+                            return 1;
+                        }
+                    };
+                    let _ = server
                         .handle(handle.clone())
                         .serve(router.clone().into_make_service())
                         .await;
@@ -697,6 +714,9 @@ fn load_rustls_config(cert_file: &str, key_file: &str) -> errors::Result<rustls:
     .ok_or_else(|| {
         errors::Error::new(errors::Kind::Internal, "no private key found".to_string())
     })?;
+    // 嵌入方的依赖图可能同时编入多个 crypto provider（rustls 自动选择会
+    // panic）；显式安装 ring，重复安装（已装过）时忽略错误。
+    let _ = rustls::crypto::ring::default_provider().install_default();
     let config = rustls::ServerConfig::builder()
         .with_no_client_auth()
         .with_single_cert(certs, key)

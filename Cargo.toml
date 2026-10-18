@@ -23,13 +23,16 @@ xyz-rust-macros = { path = "xyz-rust-macros", version = "0.4.7" }
 ctrlc = { version = "3.4", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "net", "time"], optional = true }
 axum = { version = "0.8", optional = true }
-axum-server = { version = "0.7", features = ["tls-rustls"], optional = true }
-tower-http = { version = "0.6", features = ["compression-gzip", "timeout"], optional = true }
+# tls-rustls-no-provider：axum-server 0.8 的 tls-rustls 会强制
+# rustls/aws-lc-rs，与我们的 ring 选择冲突（双 provider 会 panic）；
+# 由本库自带 ring（见 httpapi::load_rustls_config 的显式安装）。
+axum-server = { version = "0.8", features = ["tls-rustls-no-provider"], optional = true }
+tower-http = { version = "0.7", features = ["compression-gzip", "timeout"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"], optional = true }
 rustls-pemfile = { version = "2", optional = true }
 futures-util = { version = "0.3", optional = true }
 tokio-util = { version = "0.7", optional = true }
-rmcp = { version = "=3.1.4", default-features = false, features = [
+rmcp = { version = "=3.5.1", default-features = false, features = [
     "server",
     "transport-io",
     "transport-worker",

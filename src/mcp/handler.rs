@@ -12,7 +12,7 @@ use rmcp::handler::server::ServerHandler;
 use rmcp::model::{
     CallToolRequestParams, CallToolResponse, CallToolResult, ContentBlock, Implementation,
     ListToolsResult, MetaObject, PaginatedRequestParams, ProtocolVersion, ServerCapabilities,
-    ServerInfo, Tool, ToolAnnotations,
+    ServerConfig, Tool, ToolAnnotations,
 };
 use rmcp::service::{RequestContext, RoleServer};
 
@@ -170,13 +170,15 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
 }
 
 impl ServerHandler for XyzServer {
-    fn get_info(&self) -> ServerInfo {
+    fn get_info(&self) -> ServerConfig {
         // MCP 要求支持 tools 的服务器 MUST 声明 tools 能力，否则按能力协商
         // 的客户端不发 tools/list、工具面显示为 0；工具集构建期固定且不发
         // list_changed 通知，故不启用 enable_tool_list_changed。
-        let mut info = ServerInfo::new(ServerCapabilities::builder().enable_tools().build())
+        // initialize 结果只能命名「仍带 initialize 握手」的最新修订
+        // （LATEST 自 2026-07-28 起属无握手世代，用它会被协商回退覆盖）。
+        let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(self.impl_info.clone())
-            .with_protocol_version(ProtocolVersion::LATEST);
+            .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
         if let Some(ins) = &self.instructions {
             info = info.with_instructions(ins.clone());
         }
