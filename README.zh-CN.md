@@ -63,12 +63,12 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP：注册的命令即工
 - **一次定义，零样板**：整个 `main` 就是一条 `define(...) ... .run()` 链，无需 `std::process::exit`、无需手动构造注册表、无需分发开关。
 - **三通道共用一条管线**：CLI（字符串）、HTTP（JSON）、MCP arguments 先归约成同一个 `serde_json` map，再走「解码 → 默认值 → 校验 → handler」的唯一路径，行为不漂移。
 - **逐通道精细配置**：短名、别名、env 注入、绑定位置、**通道专属默认值**（全局属性默认 → 通道覆盖两级分层）。
-- **无信封响应**：基础类型裸输出、struct 键值对齐、`Vec<struct>` 表格、`--json` 翻转；HTTP 裸 JSON；MCP `structuredContent` + `textContent` 双份。
+- **无信封响应**：基础类型裸输出、struct 键值对齐、`Vec<struct>` 表格、`--json` 翻转；HTTP 裸 JSON；MCP 文本 `textContent` +（结果为 object 时）`structuredContent`（MCP 规范面为 object——§12.5）。
 - **统一错误分类 + 富化上下文**：一条 `errs::new(errs::Kind::NotFound, ...)` 同时驱动 CLI 退出码、HTTP 状态码、MCP 错误码；`with_code/with_detail/with_status` 挂载 §8.5 三层富化，三通道共享同一错误体（`{error, kind, code, detail}`，spec §8.6）。
 - **TTY 感知输出**：`--format auto`（默认）在交互式终端渲染 `text`、被管道/重定向时渲染 `jsonl`；`--format text|json|jsonl|markdown` 与 `--json` 别名可显式指定，优先级 bare 标志 > `--xyz.format` > `CliHints.format` > `Config.Format` > auto（spec §10.7）。
 - **四模式与命名空间**：`serve`（REST + `/mcp`）、`http`（仅 REST）、`mcp`、`help`——每个词都有恒可达、帮助隐藏的 `xyz.<词>` 形式；顶层段等于模式词的用户命令会遮蔽裸词（spec §13.1）。
 - **依赖洁癖**：核心模块（spec/registry/errors/cli/logx/根）除 serde 家族与 chrono 外**零第三方依赖**；唯一的其他第三方树是官方 Rust SDK（rmcp），可用 `--no-default-features` 整体剔除；按通道裁剪后最小约 0.81M。
-- **协议版本可控**：MCP 支持 2024-11-05 至 2026-07-28 五个规范版本，`--versions` 一键限定；工具同时携带派生宏生成的 `outputSchema`（OpenAPI 响应 schema 同源）。
+- **协议版本可控**：MCP 支持 2024-11-05 至 2026-07-28 五个规范版本，`--versions` 一键限定；工具携带派生宏生成的 `outputSchema`——仅限 object 型结果、且仅当协商修订为 2025-06-18 及以后（OpenAPI 响应 schema 同源）。
 - **生产友好**：SIGINT/SIGTERM 优雅关停（`Ctx` 贯穿到 handler）、`/healthz` 探活、gzip、CLI 帮助内联默认值/env/枚举、`completion bash|zsh|fish`。
 - **内置参数开箱即用**：凭据（`--bearer`）、默认地址、日志级别、超时、TLS、CORS 统一在 `Config` 与 `--xyz.*` 命名空间，模式词即命名空间（`serve --bearer=...`）。
 
@@ -236,7 +236,7 @@ define("extract", extract)
 
 **HTTP**（axum）：声明了 `HTTPHints { path }` 的命令即被路由——`method` 钉定单个或逗号分隔的多个方法（大小写归一），**空 method 同时注册 GET 与 POST**（GET 绑 query、POST 绑 JSON/form body 加 query，同一 handler；spec §11.1）；`{name}` 为路径参数，绑定到 `http = "path"` 的字段；未标注 `http:` 的字段默认从查询串绑定，JSON body 合并为入参基底；支持方法 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS（其余在注册期报错）；状态码由错误分类映射（400/401/403/404/409/499/500/503），错误体是三通道共享的 §8.6 形态（`{"error":"...","kind":"...","code":"...","detail":{...}}`——平铺 `error` 保持字节兼容；显式 `with_status` 覆盖 Kind 推导；未匹配路由返回本地化 JSON 404）；逐请求界面语言取自 `Accept-Language`（按 q 择优，`zh*`→zh-CN、`en*`→en，handler 可经 `language_from_ctx` 读取，spec §11.7）；每个响应携带服务器上下文头（`X-App-Name`、`X-App-Version`、`X-XYZ-Version`，每路由的 `X-XYZ-Command`/`X-XYZ-Duration-Ms`）以及自定义静态头（`--xyz.header k=v`；`--xyz.no-server-headers` 可关掉自动头）；`GET /openapi.json` 输出由同一 `InputSchema` 生成的**富** OpenAPI 3 文档：每 operation 带 summary + description，每个 path/query/header 字段一条 parameters（线上名、位置、正确的 required——path 参数恒真——、`desc` 描述、以及与 MCP `inputSchema` 同源的富 schema：type + enum/default/format；未标注 `http` 位置的字段按 `query` 收录），POST/PUT/PATCH 带 requestBody，每个注册方法一个 operation（默认 GET+POST 产出两条），`info.title`/`version` 取自应用身份（§11.6 同值）；`GET /healthz` 探活、gzip 自动压缩。未声明路由的命令不会出现在 REST 里。
 
-**MCP**（官方 Rust SDK rmcp）：命令即工具，`tools/list` 直接下发派生宏生成的 inputSchema 与 **outputSchema**；成功返回双份内容——`structuredContent`（裸 JSON）+ `textContent`（CLI 同款文本）；失败返回 `isError:true` + 分类消息。`initialize` 声明 tools 能力（`"capabilities":{"tools":{}}`；不声明 `listChanged`——工具集固定、不发变更通知），按能力协商的客户端因此会发 `tools/list`。支持的规范版本：`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新为无握手 `server/discover` 世代），`mcp http --versions 2025-06-18,2026-07-28` 可限定；工具元数据富化且可逐命令覆写（spec §12.4）：描述合并是默认（`MCPHints.description` 可覆写）、`MCPHints.title`（或 `title:…` 注解）写入 `annotations.title`、`MCPHints.meta` 并入工具的 `_meta`、字段描述可用 `MCPFieldHint.description` 覆写。每个结果携带 `_meta.xyz` 服务器上下文——`app_name`/`app_version`/`sdk_version`/`command`/`duration_ms`（配置了头才有 `headers`），失败时并有 `error` 子对象（`kind`/`code`/`detail`）——`serverInfo` 报告的是**应用**身份（basename / 构建注入版本，可用 `Config.name`/`Config.version` 覆盖；spec §12.6/§12.8）。内建约束：streamable HTTP 服务 2026-07-28 需 `--stateless`（SEP-2567），且 SDK 的 streamable-HTTP 服务默认只放行 loopback `Host` 头（防 DNS rebinding）。`mcp sse` 会以清晰错误应答并退出 2——见[与 Go 版差异](#与-go-版差异)。
+**MCP**（官方 Rust SDK rmcp）：命令即工具，`tools/list` 直接下发派生宏生成的 inputSchema，并在「object 型结果 + 协商修订 ≥ 2025-06-18」时附带 **outputSchema**（非 object 结果不声明 schema：声明了就得提供合规的 `structuredContent`，数组/标量永远给不出）；成功返回 CLI 同款 `textContent`，结果为 JSON object 时附加 `structuredContent`；失败返回 `isError:true` + 分类消息。`initialize` 声明 tools 能力（`"capabilities":{"tools":{}}`；不声明 `listChanged`——工具集固定、不发变更通知），按能力协商的客户端因此会发 `tools/list`。支持的规范版本：`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新为无握手 `server/discover` 世代），`mcp http --versions 2025-06-18,2026-07-28` 可限定（钉定同时约束协商出的握手版本；低于 2025-06-18 时 `outputSchema`/`structuredContent` 整个不发射——§12.5 的修订门）；工具元数据富化且可逐命令覆写（spec §12.4）：描述合并是默认（`MCPHints.description` 可覆写）、`MCPHints.title`（或 `title:…` 注解）写入 `annotations.title`、`MCPHints.meta` 并入工具的 `_meta`、字段描述可用 `MCPFieldHint.description` 覆写。每个结果携带 `_meta.xyz` 服务器上下文——`app_name`/`app_version`/`sdk_version`/`command`/`duration_ms`（配置了头才有 `headers`），失败时并有 `error` 子对象（`kind`/`code`/`detail`）——`serverInfo` 报告的是**应用**身份（basename / 构建注入版本，可用 `Config.name`/`Config.version` 覆盖；spec §12.6/§12.8）。内建约束：streamable HTTP 服务 2026-07-28 需 `--stateless`（SEP-2567），且 SDK 的 streamable-HTTP 服务默认只放行 loopback `Host` 头（防 DNS rebinding）。`mcp sse` 会以清晰错误应答并退出 2——见[与 Go 版差异](#与-go-版差异)。
 
 一条更完整的真实命令——属性、三层默认、错误分类、命名标量、`Vec<u8>`、header/env 注入都在一个定义里（取自 [examples/example/src/main.rs](examples/example/src/main.rs)）：
 
@@ -283,7 +283,7 @@ handler 形态为 `fn(&Ctx, &Args) -> Result<Resp, E>`：`E` 是任意 `std::err
 
 ### 响应呈现（无信封）
 
-| 返回类型 | CLI | `--json` / HTTP / MCP structuredContent |
+| 返回类型 | CLI | `--json` / HTTP body |
 |---|---|---|
 | `None` / null（或空 `Vec<T>`） | 无输出 | JSON `null`（空数组 → `[]`） |
 | `string` / `bool` / 数字 | 裸值一行 | 裸 JSON 值 |
@@ -291,6 +291,8 @@ handler 形态为 `fn(&Ctx, &Args) -> Result<Resp, E>`：`E` 是任意 `std::err
 | `Vec<基础类型>` | 每行一个 | JSON 数组 |
 | `struct` | 对齐 `key  value` 两列 | JSON 对象 |
 | `Vec<struct>` | 对齐表格（表头+分隔线） | JSON 数组 |
+
+MCP：结果以 `textContent` 呈现（上表的 CLI 形态）；`structuredContent` 额外携带 `struct` 结果的 JSON object——且仅当协商修订 ≥ 2025-06-18（§12.5，conformance A.64）。数组与标量**不**放入该字段。
 | `map` | 按键值对（插入序）输出 | JSON 对象 |
 | `xyz_rust::Blocks`（spec §12.7） | 文本块内联；二进制块写入临时文件、打印路径 | 块信封 JSON（`{"content":[…]}`）；MCP 以 `Content` 原样携带块 |
 
@@ -414,7 +416,7 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 5. **结果渲染**：struct 与 map 同形——都先经 serde_json 序列化成 `Value`，`preserve_order` 保留声明序（Go 的 map 按键排序）；`Vec<u8>` 作为结果类型的输出 schema 是数组形（输入侧仍是 string）；`std::time::Duration` 负值不支持（Rust 语义）；oneof 对 struct 无 `%v` 形态；`--format markdown` 下 struct 与 map 序列化后同形，统一用 `| Field | Value |` 表头（Go 的 map 用 `| Key | Value |`）。
 6. **版本注入**：发布期调用 `set_version("v1.2.3")`——Rust 没有 `-ldflags -X` 注入，默认*应用*版本为 `dev`（xyz-spec §12.6）；库自身版本（`version::SDK_VERSION` = crate 版本）另行报告于 `X-XYZ-Version` 与 `_meta.xyz.sdk_version`。
 7. **HTTP 语义**：Gzip 用 `tower-http`（任意体积响应都压缩，且完整处理 `Accept-Encoding` 的 q 值；Go 只查头）；每请求超时经 `TimeoutLayer` 应答 **408**（而非 504）；请求级取消——客户端断开不打断 handler 执行；标准头超时未配置（非零 `Config.timeout` 是唯一超时层）。
-8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）；`initialize` 的能力对象范围因 SDK 默认而不同：Go 的 go-sdk 自动发出 `{"logging":{},"tools":{"listChanged":true}}`，xyz-rust 声明真实最小集 `{"tools":{}}`（不发 list_changed 通知）。
+8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）；MCP 结构化输出按规范门控（object 才发 `outputSchema`、object 值才进 `structuredContent`、修订 ≥ 2025-06-18），而 Go 目前对一切可模式化结果类型都挂 `outputSchema`、`structuredContent` 也照发裸值——已登记 `D-go-04`；`initialize` 的能力对象范围因 SDK 默认而不同：Go 的 go-sdk 自动发出 `{"logging":{},"tools":{"listChanged":true}}`，xyz-rust 声明真实最小集 `{"tools":{}}`（不发 list_changed 通知）。
 9. **能力开关在运行时仍然可用**：`Capabilities { no_cli, no_mcp, no_http }` 是 `Config` 字段，与 Cargo features 相互独立。
 
 以上全部差异连同规范章节引用，登记在规范仓库的

@@ -290,7 +290,7 @@ fn main() {
         .also(&[
             &xyz_rust::define("user.list", list_users)
                 .summary("列出用户")
-                .description("返回用户切片：CLI 渲染成对齐表格，结构化通道保持原始数组。")
+                .description("返回用户切片：CLI 渲染成对齐表格，HTTP/--json 保持原始数组（MCP 只走文本，§12.5）。")
                 .http(HTTPHints { method: "GET".into(), path: "/users".into(), ..Default::default() }),
 
             &xyz_rust::define("user.rm", rm_user)

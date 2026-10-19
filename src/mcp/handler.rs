@@ -30,6 +30,9 @@ pub struct XyzServer {
     by_name: Arc<BTreeMap<String, Arc<Entry>>>,
     pinned: Option<Vec<ProtocolVersion>>,
     allowed: Option<std::collections::BTreeSet<String>>,
+    /// initialize 结果声明的协议版本：钉定集内最新，否则
+    /// LATEST_WITH_INITIALIZE（见 build 内说明）。
+    info_version: ProtocolVersion,
     pub(crate) ctx: Arc<Ctx>,
     defaults: std::collections::HashMap<String, String>,
     /// 结果 _meta.xyz 的上下文（§12.8）：None = 关闭（no_server_meta）。
@@ -79,6 +82,13 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
     } else {
         Some(opts.versions.iter().cloned().collect())
     };
+    // initialize 结果只能命名「仍带 initialize 握手」的版本，且不应超出
+    // --versions 钉定集——rmcp 的协商兜底直接采用该值、不核对成员资格，
+    // 钉定集外的值会「漏」给客户端（钉 2024-11-05 仍答 2025-11-25 的根因）。
+    let info_version = pinned
+        .as_ref()
+        .and_then(|p| p.iter().max_by(|a, b| a.as_str().cmp(b.as_str())).cloned())
+        .unwrap_or(ProtocolVersion::LATEST_WITH_INITIALIZE);
     let (name, version) = impl_name(opts);
     let (meta_name, meta_version) = (name.clone(), version.clone());
     let impl_info = Implementation::new(name, version);
@@ -95,14 +105,21 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
                 .cloned()
                 .unwrap_or_default(),
         );
-        let output_schema = e.output_schema.as_ref().map(|s| {
-            Arc::new(
-                crate::spec::schema::schema_to_value(s)
-                    .as_object()
-                    .cloned()
-                    .unwrap_or_default(),
-            )
-        });
+        // outputSchema 顶层必须是 object（MCP：给了 schema 就必须提供合规的
+        // structuredContent，而数组/标量 schema 不可能存在合规结果）——
+        // 非 object 的结果类型不发射 schema，结果只走 textContent（ddc#9）。
+        let output_schema = e
+            .output_schema
+            .as_ref()
+            .filter(|s| s.r#type.as_deref() == Some("object"))
+            .map(|s| {
+                Arc::new(
+                    crate::spec::schema::schema_to_value(s)
+                        .as_object()
+                        .cloned()
+                        .unwrap_or_default(),
+                )
+            });
         // spec §12.4：描述可经 MCPHints.description 覆写，否则 summary+
         // description 合并；title 经 hints 或 title:… 注解写入
         // annotations.title；hints.meta 并入工具的保留 _meta。
@@ -163,6 +180,7 @@ pub fn build(reg: &Registry, opts: &Options, ctx: Arc<Ctx>) -> errors::Result<Xy
         by_name: Arc::new(by_name),
         pinned,
         allowed,
+        info_version,
         ctx,
         defaults: opts.defaults.clone(),
         meta_ctx,
@@ -174,11 +192,9 @@ impl ServerHandler for XyzServer {
         // MCP 要求支持 tools 的服务器 MUST 声明 tools 能力，否则按能力协商
         // 的客户端不发 tools/list、工具面显示为 0；工具集构建期固定且不发
         // list_changed 通知，故不启用 enable_tool_list_changed。
-        // initialize 结果只能命名「仍带 initialize 握手」的最新修订
-        // （LATEST 自 2026-07-28 起属无握手世代，用它会被协商回退覆盖）。
         let mut info = ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_server_info(self.impl_info.clone())
-            .with_protocol_version(ProtocolVersion::LATEST_WITH_INITIALIZE);
+            .with_protocol_version(self.info_version.clone());
         if let Some(ins) = &self.instructions {
             info = info.with_instructions(ins.clone());
         }
@@ -195,9 +211,12 @@ impl ServerHandler for XyzServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(self.tools.clone()))
+        Ok(ListToolsResult::with_all_items(shape_tools(
+            self.tools.clone(),
+            context.protocol_version().as_ref(),
+        )))
     }
 
     fn get_tool(&self, name: &str) -> Option<Tool> {
@@ -252,7 +271,8 @@ impl ServerHandler for XyzServer {
         match (entry.invoke)(&self.ctx, &arguments) {
             Ok(out) => {
                 let meta = self.meta_for(&entry.name, started.elapsed(), None);
-                Ok(success_response(out, meta))
+                let structured = supports_structured(context.protocol_version().as_ref());
+                Ok(success_response(out, meta, structured))
             }
             Err(e) => {
                 let msg = match e.cause() {
@@ -338,20 +358,42 @@ pub(super) fn result_meta(
 pub(super) fn success_response(
     out: serde_json::Value,
     meta: Option<MetaObject>,
+    structured: bool,
 ) -> CallToolResponse {
+    // structuredContent 必须是 JSON object（MCP 规范），且该字段与
+    // outputSchema 自 2025-06-18 修订才入规——不满足时只走 textContent
+    // （ddc#9：数组/标量结果此前发裸值，严格客户端直接拒绝）。
+    let structured = structured && out.is_object();
     if let Some(blocks) = crate::blocks::extract(&out) {
         let mut result = CallToolResult::error(to_rmcp_blocks(&blocks));
         result.is_error = None;
-        result.structured_content = Some(out);
+        result.structured_content = structured.then_some(out);
         result.meta = meta;
         return CallToolResponse::Complete(result);
     }
     let text = render_text(&out);
     let mut result = CallToolResult::error(vec![ContentBlock::text(text)]);
     result.is_error = None;
-    result.structured_content = Some(out);
+    result.structured_content = structured.then_some(out);
     result.meta = meta;
     CallToolResponse::Complete(result)
+}
+
+/// outputSchema / structuredContent 自 2025-06-18 修订入规；更早的协商版本
+/// 一律不发射（`--versions` 钉旧版因此是有效的逃生门）。
+pub(super) fn supports_structured(client: Option<&ProtocolVersion>) -> bool {
+    client.is_none_or(|v| *v >= ProtocolVersion::V_2025_06_18)
+}
+
+/// tools/list 整形：客户端协商版本 < 2025-06-18 时逐请求剥离
+/// outputSchema（工具表构建期只带合规 schema）。
+pub(super) fn shape_tools(mut tools: Vec<Tool>, client: Option<&ProtocolVersion>) -> Vec<Tool> {
+    if !supports_structured(client) {
+        for t in &mut tools {
+            t.output_schema = None;
+        }
+    }
+    tools
 }
 
 fn render_text(v: &serde_json::Value) -> String {

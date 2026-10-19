@@ -219,7 +219,7 @@ fn block_envelope_passes_through() {
         {"type":"text","text":"hello"},
         {"type":"image","mimeType":"image/png","data":"aGVsbG8="}
     ]});
-    let resp = handler::success_response(env.clone(), None);
+    let resp = handler::success_response(env.clone(), None, true);
     let CallToolResponse::Complete(res) = resp else {
         panic!("want complete response");
     };
@@ -239,7 +239,7 @@ fn block_envelope_passes_through() {
     assert_eq!(res.structured_content, Some(env));
 
     // 普通 JSON 不误报：走 §12.5 文本+structured 双内容。
-    let resp = handler::success_response(serde_json::json!({"msg": "hi"}), None);
+    let resp = handler::success_response(serde_json::json!({"msg": "hi"}), None, true);
     let CallToolResponse::Complete(plain) = resp else {
         panic!("want complete response");
     };
@@ -333,7 +333,7 @@ fn result_meta_shape() {
     assert_eq!(v["xyz"]["error"]["detail"]["user_id"], 7);
 
     // success_response 把 meta 挂到结果上。
-    let resp = success_response(serde_json::json!("ok"), Some(meta));
+    let resp = success_response(serde_json::json!("ok"), Some(meta), true);
     let CallToolResponse::Complete(res) = resp else {
         panic!("complete");
     };
@@ -403,4 +403,84 @@ fn tool_metadata_rich_overrides() {
     // 字段描述覆写进 inputSchema（MCP 在 build_schema 前应用）。
     let v: serde_json::Value = serde_json::to_value(&*tool.input_schema).unwrap();
     assert_eq!(v["properties"]["k"]["description"], "字段描述覆写");
+}
+
+#[test]
+fn non_object_results_omit_output_schema_and_structured_content() {
+    use rmcp::model::{CallToolResponse, ProtocolVersion};
+
+    // 数组返回：outputSchema 构建期不发射（有 schema 就必须有合规
+    // structuredContent，数组 schema 不可能有——ddc#9）。
+    fn arr(_: &Ctx, _: &SumArgs) -> errors::Result<Vec<String>> {
+        Ok(vec!["a".into(), "b".into()])
+    }
+    let reg = Registry::new();
+    Command::new("arr.list", arr).register(&reg).unwrap();
+    Command::new("math.sum", sum).register(&reg).unwrap();
+    let srv = handler::build(&reg, &Options::default(), Arc::new(Ctx::new())).unwrap();
+    assert!(
+        srv.get_tool("arr.list").unwrap().output_schema.is_none(),
+        "array-typed result must not advertise outputSchema"
+    );
+    assert!(
+        srv.get_tool("math.sum").unwrap().output_schema.is_some(),
+        "object-typed result keeps its outputSchema"
+    );
+
+    // 响应侧：裸数组不发 structuredContent，文本照常。
+    let resp = handler::success_response(serde_json::json!(["a", "b"]), None, true);
+    let CallToolResponse::Complete(res) = resp else {
+        panic!("want complete response");
+    };
+    assert!(res.structured_content.is_none());
+    assert!(matches!(res.content[0], rmcp::model::ContentBlock::Text(_)));
+    // 对象结果：照常双内容。
+    let resp = handler::success_response(serde_json::json!({"sum": 3}), None, true);
+    let CallToolResponse::Complete(res) = resp else {
+        panic!("want complete response");
+    };
+    assert_eq!(res.structured_content, Some(serde_json::json!({"sum": 3})));
+
+    // 版本门控：< 2025-06-18 时 outputSchema 逐请求剥离，structuredContent
+    // 也不发射；2025-06-18 及以后维持（None = 无握手世代，视为最新）。
+    let tools = handler::shape_tools(srv_tools(&srv), None);
+    assert!(tools.iter().any(|t| t.output_schema.is_some()));
+    let tools = handler::shape_tools(srv_tools(&srv), Some(&ProtocolVersion::V_2025_03_26));
+    assert!(tools.iter().all(|t| t.output_schema.is_none()));
+    let tools = handler::shape_tools(srv_tools(&srv), Some(&ProtocolVersion::V_2025_06_18));
+    assert!(tools.iter().any(|t| t.output_schema.is_some()));
+    assert!(!handler::supports_structured(Some(
+        &ProtocolVersion::V_2024_11_05
+    )));
+    assert!(handler::supports_structured(Some(
+        &ProtocolVersion::V_2025_11_25
+    )));
+    assert!(handler::supports_structured(None));
+}
+
+fn srv_tools(srv: &handler::XyzServer) -> Vec<rmcp::model::Tool> {
+    ["arr.list", "math.sum"]
+        .iter()
+        .filter_map(|n| srv.get_tool(n))
+        .collect()
+}
+
+#[test]
+fn pinned_versions_drive_the_initialize_handshake_version() {
+    use rmcp::model::ProtocolVersion;
+
+    // 钉定集内最新（rmcp 的协商兜底直接用该值，超出钉定集会漏给客户端）。
+    let opts = Options {
+        versions: vec!["2024-11-05".into(), "2025-03-26".into()],
+        ..Options::default()
+    };
+    let srv = handler::build(&reg(), &opts, Arc::new(Ctx::new())).unwrap();
+    assert_eq!(srv.get_info().protocol_version.as_str(), "2025-03-26");
+
+    // 未钉定：仍带 initialize 握手的最新修订。
+    let srv = handler::build(&reg(), &Options::default(), Arc::new(Ctx::new())).unwrap();
+    assert_eq!(
+        srv.get_info().protocol_version,
+        ProtocolVersion::LATEST_WITH_INITIALIZE
+    );
 }

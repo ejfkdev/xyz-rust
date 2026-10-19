@@ -142,6 +142,12 @@ evidence that locks it:
   built once and no change notifications are ever emitted). Evidence:
   `mcp::mcp_test::impl_defaults` pins the wire shape.
 
+- **0.4.9** — MCP structured-output gating (§12.3/§12.5, conformance A.64):
+  `outputSchema` only for object-typed results, `structuredContent` only for
+  object values, both only for negotiated revisions ≥ 2025-06-18; the
+  `--versions` pin now also bounds the negotiated handshake version
+  (Go's unconditional emission is filed as `D-go-04`).
+
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;
 the reserved style axis (§10.7a colour) is explicitly future work per spec.
