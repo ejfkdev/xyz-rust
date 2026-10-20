@@ -137,7 +137,13 @@ fn render_table(w: &mut dyn Write, items: &[Value]) -> errors::Result<()> {
     if keys.is_empty() {
         return Ok(());
     }
-    let mut widths: Vec<usize> = keys.iter().map(|k| k.len()).collect();
+    // 宽度按字符计（fmt 的 `{:<width$}` 以字符补白），并对补白宽度封顶：
+    // Rust 的命名宽度参数是 u16（> u16::MAX 会 panic! "Formatting argument
+    // out of range"），超长单元格（引用方法列表等）曾直接打死渲染器；封顶
+    // 同时避免按全局最宽单元格把每行都补到几十 KB。
+    const MAX_PAD: usize = 200;
+    let cell_width = |c: &str| c.chars().count().min(MAX_PAD);
+    let mut widths: Vec<usize> = keys.iter().map(|k| cell_width(k)).collect();
     let mut rows: Vec<Vec<String>> = Vec::with_capacity(items.len());
     for item in items {
         let mut row = Vec::with_capacity(keys.len());
@@ -145,7 +151,7 @@ fn render_table(w: &mut dyn Write, items: &[Value]) -> errors::Result<()> {
             Some(o) => {
                 for (j, k) in keys.iter().enumerate() {
                     let cell = o.get(*k).map(format_cell).unwrap_or_default();
-                    widths[j] = widths[j].max(cell.len());
+                    widths[j] = widths[j].max(cell_width(&cell));
                     row.push(cell);
                 }
             }
@@ -195,5 +201,48 @@ pub fn format_cell(v: &Value) -> String {
             format!("[{inner}]")
         }
         Value::Object(o) => serde_json::to_string(o).unwrap_or_else(|_| "{}".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn render(v: &Value) -> String {
+        let mut out = Vec::new();
+        render_value(&mut out, v).unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn long_cells_do_not_panic_and_pad_is_capped() {
+        // 70k chars > u16::MAX (the width argument limit) — used to panic.
+        let long = "x".repeat(70_000);
+        let v = serde_json::json!([
+            {"a": long.clone(), "b": "y"},
+            {"a": "short", "b": "z"},
+        ]);
+        let text = render(&v);
+        assert!(text.contains(&long), "long cell content must be preserved");
+        // The padding width is capped: the short row must not carry 70k spaces.
+        let second = text.lines().nth(3).unwrap();
+        assert!(
+            second.len() < 1000,
+            "row padded to the long cell width: {} bytes",
+            second.len()
+        );
+    }
+
+    #[test]
+    fn cjk_cells_use_char_widths() {
+        let v = serde_json::json!([
+            {"name": "中文", "n": 1},
+            {"name": "ab", "n": 2},
+        ]);
+        let text = render(&v);
+        // header rule width == char count of the widest cell (2), not bytes.
+        let rule = text.lines().nth(1).unwrap();
+        assert!(rule.starts_with("----"), "{rule}");
+        assert_eq!(rule.split("  ").next().unwrap().chars().count(), 4);
     }
 }

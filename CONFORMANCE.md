@@ -153,6 +153,16 @@ evidence that locks it:
   the mount built `Options` from scratch and reported `bin_name`/"0.0.0"
   in `serverInfo`, diverging from the standalone `mcp` modes.
 
+- **0.4.11** — table renderer: cell widths are counted in characters (fmt
+  pads by chars, so CJK columns aligned short) and the padding width is
+  capped at 200. A cell longer than u16::MAX characters (>65535) used to
+  panic the whole process — named format widths are stored as u16 in Rust,
+  so `{:<width$}` aborted with "Formatting argument out of range"; this
+  killed an MCP worker on a `strings --with-locations` call whose `""`
+  entry carried 526 referencing methods. Long cell content is still
+  emitted in full; only the padding is capped, which also removes the
+  multi-MB padding blow-up on wide tables.
+
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;
 the reserved style axis (§10.7a colour) is explicitly future work per spec.
