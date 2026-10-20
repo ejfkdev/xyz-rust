@@ -148,6 +148,11 @@ evidence that locks it:
   `--versions` pin now also bounds the negotiated handshake version
   (Go's unconditional emission is filed as `D-go-04`).
 
+- **0.4.10** — serve's mounted `/mcp` now inherits the app identity from
+  config (`resolved_name()`/`resolved_version()`, spec §12.6): previously
+  the mount built `Options` from scratch and reported `bin_name`/"0.0.0"
+  in `serverInfo`, diverging from the standalone `mcp` modes.
+
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;
 the reserved style axis (§10.7a colour) is explicitly future work per spec.

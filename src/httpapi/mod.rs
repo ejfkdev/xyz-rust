@@ -571,6 +571,11 @@ pub(crate) fn serve(
             && let Some(m) = crate::mcp::mountable(
                 reg,
                 &crate::mcp::Options {
+                    // serve 挂载的 /mcp 与独立 mcp 模式共用同一应用身份
+                    // （spec §12.6 serverInfo）：不继承 cfg 时挂载端回退到
+                    // bin_name/"0.0.0"，与 stdio/http 模式报告不一致。
+                    name: cfg.resolved_name(),
+                    version: cfg.resolved_version(),
                     bearer_tokens: cfg.bearer_tokens.clone(),
                     default_ctx: Some(sctx.clone()),
                     defaults: cfg.channel_defaults.clone(),
