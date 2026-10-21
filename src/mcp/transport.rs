@@ -207,6 +207,13 @@ pub(crate) fn streamable_service(
     let mut config = StreamableHttpServerConfig::default();
     config.legacy_session_mode = !opts.stateless;
     config.json_response = opts.json_response;
+    // rmcp 3.6.0 只在 stateless 路径实现 json_response；legacy session 始终
+    // 回 SSE——明确告警，避免该选项看起来生效。
+    if opts.json_response && !opts.stateless {
+        crate::logx::warnf(format_args!(
+            "--json-response has no effect without --stateless (rmcp's legacy session mode always answers text/event-stream)"
+        ));
+    }
     Ok(StreamableHttpService::new(
         move || Ok::<_, std::io::Error>(server.clone()),
         Arc::new(manager),

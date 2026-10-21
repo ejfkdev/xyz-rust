@@ -81,6 +81,10 @@ pub fn strip_xyz_flags(args: Vec<String>, cfg: &mut Config) -> errors::Result<Ve
                 cfg.no_server_headers = true;
                 true
             }
+            "--xyz.allow-unknown-query" => {
+                cfg.allow_unknown_query = true;
+                true
+            }
             "--xyz.lang" => {
                 let v = take_value(&args, &mut i, &a)?;
                 if crate::lang::XyzLang::parse(&v).is_none() {

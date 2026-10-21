@@ -16,7 +16,7 @@ following evidence:
 
 | Evidence | Covers |
 |---|---|
-| `cargo test -p xyz-rust --lib` (123 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
+| `cargo test -p xyz-rust --lib` (128 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.89 | A.38–A.39 trim invariants |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
@@ -162,6 +162,15 @@ evidence that locks it:
   entry carried 526 referencing methods. Long cell content is still
   emitted in full; only the padding is capped, which also removes the
   multi-MB padding blow-up on wide tables.
+
+- **0.4.12** — HTTP strictness and upstream refresh: unknown query parameters
+  now answer 400 `invalid_input` naming the parameter and the accepted set
+  (§11.2, conformance A.65) with `--xyz.allow-unknown-query` as the opt-out;
+  the §4.6 wire-name override now applies to query and form lookups as well;
+  `--json-response` without `--stateless` logs a warning (rmcp's legacy
+  session mode always answers SSE); rmcp upgraded to 3.6.0 (fixes
+  `server/discover` without params, float-form ids, and consistent non-JSON
+  stdio handling; remaining upstream limits are documented in the README).
 
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;

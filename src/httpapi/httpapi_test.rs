@@ -121,13 +121,33 @@ async fn undeclared_body_is_not_rejected_as_json() {
     let (status, out) = call(router.clone(), req).await;
     assert_eq!(status, 200);
     assert_eq!(out.trim(), "\"note=hello form\"");
-    // form 值只取请求体，不混入 query（与上游 v0.2.2 一致）
+    // 严格模式（默认）：form 字段是唯一入参，同名 query 参数属于未知参数
+    // → 400（spec §11.2）。
     let req = Request::builder()
         .method("POST")
         .uri("/f?note=fromquery")
         .body(Body::from("note=frombody".to_string()))
         .unwrap();
-    let (_, out) = call(router, req).await;
+    let (status, _) = call(router, req).await;
+    assert_eq!(status, 400);
+    // 放宽路由下验证绑定语义本身：form 值只取请求体，不混入 query
+    // （与上游 v0.2.2 一致）。
+    let lenient = httpapi::router_with(
+        &reg,
+        Arc::new(Ctx::new()),
+        Default::default(),
+        false,
+        true,
+        "app",
+        "1",
+    )
+    .unwrap();
+    let req = Request::builder()
+        .method("POST")
+        .uri("/f?note=fromquery")
+        .body(Body::from("note=frombody".to_string()))
+        .unwrap();
+    let (_, out) = call(lenient, req).await;
     assert_eq!(out.trim(), "\"note=frombody\"");
 }
 
@@ -755,4 +775,75 @@ async fn lowercase_methods_and_route_conflict_becomes_error() {
         err.to_string().contains("conflict"),
         "want conflict error, got: {err}"
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn unknown_query_parameters_are_rejected() {
+    use crate::registry::Registry;
+    use crate::spec::command::Command;
+
+    #[derive(xyz_rust::XyzArgs)]
+    struct QArgs {
+        #[xyz(desc = "标签", http = "query")]
+        tag: Vec<String>,
+        // §4.6：http_name 覆写线上名（query 也适用，与 OpenAPI 一致）。
+        #[xyz(desc = "覆写名", http = "query", http_name = "X-Q")]
+        q: String,
+    }
+    fn list_q(_: &Ctx, a: &QArgs) -> errors::Result<String> {
+        Ok(format!("{}|{}", a.tag.join(","), a.q))
+    }
+    let reg = Registry::new();
+    Command::new("q.list", list_q)
+        .http(HTTPHints {
+            method: "GET".into(),
+            path: "/q".into(),
+            ..Default::default()
+        })
+        .register(&reg)
+        .unwrap();
+
+    let strict = httpapi::router(&reg, Arc::new(Ctx::new())).unwrap();
+    // 已知参数（重复数组 + http_name 覆写名）正常，且覆写名确实绑定。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/q?tag=a&tag=b&X-Q=hello")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(strict.clone(), req).await;
+    assert_eq!(status, 200);
+    assert_eq!(out.trim(), "\"a,b|hello\"");
+
+    // 未知参数 → 400 + 标准失败信封，消息含参数名与允许集。
+    let req = Request::builder()
+        .method("GET")
+        .uri("/q?tag=a&bogus=1")
+        .body(Body::empty())
+        .unwrap();
+    let (status, out) = call(strict.clone(), req).await;
+    assert_eq!(status, 400);
+    let v: serde_json::Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["kind"], "invalid_input");
+    let msg = v["error"].as_str().unwrap();
+    assert!(msg.contains("bogus"), "{msg}");
+    assert!(msg.contains("tag") && msg.contains("X-Q"), "{msg}");
+
+    // 放宽开关：--xyz.allow-unknown-query / Config.allow_unknown_query。
+    let lenient = httpapi::router_with(
+        &reg,
+        Arc::new(Ctx::new()),
+        Default::default(),
+        false,
+        true,
+        "app",
+        "1",
+    )
+    .unwrap();
+    let req = Request::builder()
+        .method("GET")
+        .uri("/q?tag=a&bogus=1")
+        .body(Body::empty())
+        .unwrap();
+    let (status, _) = call(lenient, req).await;
+    assert_eq!(status, 200);
 }

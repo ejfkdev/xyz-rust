@@ -101,6 +101,10 @@ pub struct Config {
     /// _meta.xyz）：spec §11.6/§12.8 的单一开关。自定义头不受影响。
     /// 命令行：--xyz.no-server-headers。
     pub no_server_headers: bool,
+    /// 接受未知 query 参数（默认 false = 严格：400 `invalid_input`，消息列出
+    /// 该路由允许的参数集；spec §11.2）。静默忽略会让拼错/已移除的参数看起来
+    /// 生效。命令行：--xyz.allow-unknown-query。
+    pub allow_unknown_query: bool,
 }
 
 impl Config {

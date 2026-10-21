@@ -997,9 +997,9 @@ dependencies = [
 
 [[package]]
 name = "rmcp"
-version = "3.5.1"
+version = "3.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab5023804cbe0304cbe06197ac16e645a0a0d0ffa2953bf735c15c2fa0213350"
+checksum = "ceb42e9e47443cd83a834dea57b5816d35481417bae72ade5dc5615c59122e26"
 dependencies = [
  "async-trait",
  "base64",
@@ -1010,6 +1010,7 @@ dependencies = [
  "http-body",
  "http-body-util",
  "indexmap",
+ "libc",
  "pastey",
  "pin-project-lite",
  "rand",
@@ -1717,7 +1718,7 @@ dependencies = [
 
 [[package]]
 name = "xyz-rust"
-version = "0.4.11"
+version = "0.4.12"
 dependencies = [
  "axum",
  "axum-server",
@@ -1740,7 +1741,7 @@ dependencies = [
 
 [[package]]
 name = "xyz-rust-macros"
-version = "0.4.11"
+version = "0.4.12"
 dependencies = [
  "proc-macro2",
  "quote",

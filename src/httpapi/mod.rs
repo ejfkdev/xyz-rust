@@ -47,6 +47,7 @@ pub fn router(reg: &Registry, ctx: Arc<Ctx>) -> errors::Result<Router> {
         ctx,
         std::collections::HashMap::new(),
         false,
+        false,
         &crate::cli::bin_name(),
         crate::version::version(),
     )
@@ -58,13 +59,22 @@ pub(crate) fn router_with(
     ctx: Arc<Ctx>,
     defaults: std::collections::HashMap<String, String>,
     no_server_headers: bool,
+    allow_unknown_query: bool,
     app_name: &str,
     app_version: &str,
 ) -> errors::Result<Router> {
     // 装配期 axum 可能因路由冲突 panic（例如用户命令占用 /healthz）——
     // 捕获并转为注册期错误（对齐 Go registerSafe 的 recover）。
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        router_inner(reg, ctx, defaults, no_server_headers, app_name, app_version)
+        router_inner(
+            reg,
+            ctx,
+            defaults,
+            no_server_headers,
+            allow_unknown_query,
+            app_name,
+            app_version,
+        )
     }))
     .unwrap_or_else(|p| {
         let msg = p
@@ -84,6 +94,7 @@ fn router_inner(
     ctx: Arc<Ctx>,
     defaults: std::collections::HashMap<String, String>,
     no_server_headers: bool,
+    allow_unknown_query: bool,
     app_name: &str,
     app_version: &str,
 ) -> errors::Result<Router> {
@@ -113,6 +124,7 @@ fn router_inner(
                 Arc::clone(&ctx),
                 Arc::new(defaults.clone()),
                 no_server_headers,
+                allow_unknown_query,
             );
             let mr = method_router(&method, h)?;
             r = r.route(&e.http.path, mr);
@@ -194,6 +206,8 @@ pub struct EntryHandler {
     pub(crate) defaults: Arc<std::collections::HashMap<String, String>>,
     /// 关闭每路由的 X-XYZ-Command/X-XYZ-Duration-Ms（§11.6 单一开关）。
     pub(crate) no_server_headers: bool,
+    /// 接受未知 query 参数（默认严格拒绝，spec §11.2）。
+    pub(crate) allow_unknown_query: bool,
 }
 
 impl axum::handler::Handler<(), ()> for EntryHandler {
@@ -205,6 +219,7 @@ impl axum::handler::Handler<(), ()> for EntryHandler {
                 &self.ctx,
                 &self.defaults,
                 self.no_server_headers,
+                self.allow_unknown_query,
                 req,
             )
             .await
@@ -218,6 +233,7 @@ pub fn handler_for(entry: Arc<Entry>) -> EntryHandler {
         Arc::new(Ctx::new()),
         Arc::new(std::collections::HashMap::new()),
         false,
+        false,
     )
 }
 
@@ -227,12 +243,14 @@ fn handle_entry_c(
     ctx: Arc<Ctx>,
     defaults: Arc<std::collections::HashMap<String, String>>,
     no_server_headers: bool,
+    allow_unknown_query: bool,
 ) -> EntryHandler {
     EntryHandler {
         entry,
         ctx,
         defaults,
         no_server_headers,
+        allow_unknown_query,
     }
 }
 
@@ -241,6 +259,7 @@ async fn handle_request(
     ctx: &Arc<Ctx>,
     defaults: &std::collections::HashMap<String, String>,
     no_server_headers: bool,
+    allow_unknown_query: bool,
     req: Request,
 ) -> Response {
     let (parts, body) = req.into_parts();
@@ -260,6 +279,37 @@ async fn handle_request(
         Some(l) => crate::lang::t_lang(l, key),
         None => crate::lang::t(key),
     };
+    let localize_tf = |key: &str, params: &[&str]| match req_lang {
+        Some(l) => crate::lang::tf_lang(l, key, params),
+        None => crate::lang::tf(key, params),
+    };
+
+    // 未知 query 参数默认严格拒绝（spec §11.2）：静默忽略会让拼错或已移除
+    // 的参数看起来生效（客户端据此误判）。允许集 = 本路由以 query 绑定的
+    // 字段（含 §4.6 的 http_name 覆写名）。--xyz.allow-unknown-query 放宽。
+    if !allow_unknown_query && !query.is_empty() {
+        let mut allowed: Vec<&str> = Vec::new();
+        for f in &entry.root.children {
+            if f.skip || !matches!(f.http.location.as_str(), "" | "query") {
+                continue;
+            }
+            let n = http_name(f);
+            if !allowed.contains(&n) {
+                allowed.push(n);
+            }
+        }
+        let names = if allowed.is_empty() {
+            "—".to_string()
+        } else {
+            allowed.join(", ")
+        };
+        for (k, _) in parse_form_query(&query) {
+            if !allowed.contains(&k.as_str()) {
+                let msg = localize_tf("http.err_unknown_query", &[&k, &names]);
+                return write_coded_error(&errors::Error::new(errors::Kind::InvalidInput, msg));
+            }
+        }
+    }
 
     let mut m: Map<String, Value> = Map::new();
     // 铺底：HTTP 专属默认值（全局默认由 Invoke 补齐）。
@@ -318,7 +368,8 @@ async fn handle_request(
         }
         match f.http.location.as_str() {
             "" | "query" => {
-                if let Some(vs) = query_values(&query, &f.json_name) {
+                // §4.6：http_name 覆写线上名（query 也适用，与 OpenAPI 一致）。
+                if let Some(vs) = query_values(&query, http_name(f)) {
                     if is_string_slice(f) {
                         m.insert(
                             f.json_name.clone(),
@@ -352,7 +403,7 @@ async fn handle_request(
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .find(|(k, _)| k == &f.json_name)
+                    .find(|(k, _)| k == http_name(f))
                 {
                     m.insert(f.json_name.clone(), Value::String(v.clone()));
                 }
@@ -555,6 +606,7 @@ pub(crate) fn serve(
         Arc::clone(&sctx),
         cfg.channel_defaults.clone(),
         cfg.no_server_headers,
+        cfg.allow_unknown_query,
         &cfg.resolved_name(),
         &cfg.resolved_version(),
     ) {

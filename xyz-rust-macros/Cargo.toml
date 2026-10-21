@@ -1,6 +1,6 @@
 [package]
 name = "xyz-rust-macros"
-version = "0.4.11"
+version = "0.4.12"
 rust-version = "1.89"
 edition = "2024"
 description = "Derive macros for xyz-rust（XyzArgs / XyzScalar / XyzOutput）"

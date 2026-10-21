@@ -107,7 +107,7 @@ const EN: &[(&str, &str)] = &[
     ),
     (
         "mode_help.mcp",
-        "{0}: start the MCP server (official SDK); one tool per registered command.\n\nUsage: {0} stdio|http [flags]\n  stdio  local process transport\n  http   streamable HTTP (2026-07-28 needs --stateless)\n\nFlags: --addr :8080, --versions v1,v2, --name N, --server-version V,\n  --bearer tok1,tok2, --cors a,b, --session-timeout 30m, --default k=v.\n-h/--help prints this.",
+        "{0}: start the MCP server (official SDK); one tool per registered command.\n\nUsage: {0} stdio|http [flags]\n  stdio  local process transport\n  http   streamable HTTP (2026-07-28 needs --stateless)\n\nFlags: --addr :8080, --versions v1,v2, --name N, --server-version V,\n  --bearer tok1,tok2, --cors a,b, --session-timeout 30m, --default k=v,\n  --stateless, --json-response (needs --stateless).\n-h/--help prints this.",
     ),
     (
         "mode_help.help",
@@ -115,6 +115,10 @@ const EN: &[(&str, &str)] = &[
     ),
     ("http.err_invalid_json", "invalid JSON body"),
     ("http.err_not_found", "not found"),
+    (
+        "http.err_unknown_query",
+        "unknown query parameter \"{0}\" (allowed: {1})",
+    ),
     ("overview.disabled", " (disabled)"),
     ("overview.not_compiled", " (not compiled into this binary)"),
     ("help.usage", "Usage:"),
@@ -229,7 +233,7 @@ const ZH: &[(&str, &str)] = &[
     ),
     (
         "mode_help.mcp",
-        "{0}：启动 MCP 服务器（官方 SDK）；每个已注册命令一个工具。\n\n用法：{0} stdio|http [旗标]\n  stdio  本地进程传输\n  http   流式 HTTP（2026-07-28 需 --stateless）\n\n旗标：--addr :8080、--versions v1,v2、--name N、--server-version V、\n  --bearer tok1,tok2、--cors a,b、--session-timeout 30m、--default k=v。\n-h/--help 打印本帮助。",
+        "{0}：启动 MCP 服务器（官方 SDK）；每个已注册命令一个工具。\n\n用法：{0} stdio|http [旗标]\n  stdio  本地进程传输\n  http   流式 HTTP（2026-07-28 需 --stateless）\n\n旗标：--addr :8080、--versions v1,v2、--name N、--server-version V、\n  --bearer tok1,tok2、--cors a,b、--session-timeout 30m、--default k=v、\n  --stateless、--json-response（需配 --stateless）。\n-h/--help 打印本帮助。",
     ),
     (
         "mode_help.help",
@@ -237,6 +241,10 @@ const ZH: &[(&str, &str)] = &[
     ),
     ("http.err_invalid_json", "无效的 JSON 请求体"),
     ("http.err_not_found", "未找到"),
+    (
+        "http.err_unknown_query",
+        "未知查询参数 \"{0}\"（允许的参数：{1}）",
+    ),
     ("overview.disabled", "（已禁用）"),
     ("overview.not_compiled", "（本二进制未编译）"),
     ("help.usage", "Usage:"),
