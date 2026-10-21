@@ -19,6 +19,9 @@
 //	cargo run --example example -- file hash --data hello   # Vec<u8>（SHA-256）
 //	NEXT_KEY=k cargo run --example example -- net head      # header/http_name + env
 //	cargo run --example example -- mcp stdio                # MCP：命令即工具
+//	cargo run --example example -- sys seq --n 5              # Vec<i64>：CLI 每行一个
+//	cargo run --example example -- blocks show               # 内容块：文本 + 图片落盘路径
+//	cargo run --example example -- pick by                   # 联合字段：CLI 跳过（HTTP/MCP 可用）
 //	cargo run --example example -- serve --addr :8080       # HTTP：REST + /openapi.json + /mcp
 
 use std::collections::HashMap;
@@ -260,6 +263,60 @@ fn head(_ctx: &xyz_rust::Ctx, in_: &HeadArgs) -> errs::Result<String> {
     Ok(format!("api key accepted ({} bytes)", in_.key.len()))
 }
 
+// ---- sys.seq：大序列输出（Vec<i64>）——CLI 每行一个、jsonl 可续读 ----
+
+#[derive(XyzArgs)]
+struct SeqArgs {
+    #[xyz(desc = "数量", default = "100000")]
+    n: i64,
+}
+
+fn seq(_ctx: &xyz_rust::Ctx, in_: &SeqArgs) -> errs::Result<Vec<i64>> {
+    Ok((0..in_.n.max(0)).collect())
+}
+
+// ---- blocks.show：内容块结果（spec §12.7）——文本 + 图片块 ----
+
+#[derive(XyzArgs)]
+struct BlocksArgs {
+    #[xyz(desc = "文本", default = "hello")]
+    text: String,
+}
+
+fn blocks_show(_ctx: &xyz_rust::Ctx, in_: &BlocksArgs) -> errs::Result<xyz_rust::blocks::Blocks> {
+    Ok(xyz_rust::blocks::Blocks::new(vec![
+        xyz_rust::blocks::Block::Text {
+            text: in_.text.clone(),
+        },
+        xyz_rust::blocks::Block::Image {
+            mime_type: "image/png".into(),
+            data: "iVBORw0KGgo=".into(), // PNG magic（base64）
+        },
+    ]))
+}
+
+// ---- pick.by：带标签联合（spec §4.7）——HTTP/MCP 走 oneOf；CLI 跳过该字段 ----
+
+#[derive(serde::Serialize, serde::Deserialize, xyz_rust::XyzArgs)]
+#[serde(tag = "kind")]
+enum Selector {
+    ById { id: i64 },
+    ByName { name: String },
+}
+
+#[derive(XyzArgs)]
+struct PickArgs {
+    #[xyz(desc = "选择器", required)]
+    sel: Selector,
+}
+
+fn pick(_ctx: &xyz_rust::Ctx, in_: &PickArgs) -> errs::Result<String> {
+    Ok(match &in_.sel {
+        Selector::ById { id } => format!("id={id}"),
+        Selector::ByName { name } => format!("name={name}"),
+    })
+}
+
 fn cli_fields(pairs: &[(&str, CliFieldHint)]) -> HashMap<String, CliFieldHint> {
     pairs
         .iter()
@@ -285,7 +342,8 @@ fn main() {
             ]),
             ..Default::default()
         })
-        .http(HTTPHints { method: "POST".into(), path: "/users/{name}".into(), ..Default::default() })
+        // 空 method：同一 handler 同时注册 GET（query 绑定）与 POST（body+query）。
+        .http(HTTPHints { method: String::new(), path: "/users/{name}".into(), ..Default::default() })
         .mcp(MCPHints { annotations: vec!["write".into(), "title:创建用户".into()], ..Default::default() })
         .also(&[
             &xyz_rust::define("user.list", list_users)
@@ -335,6 +393,9 @@ fn main() {
                     ..Default::default()
                 }),
 
+            &xyz_rust::define("sys.seq", seq)
+                .summary("生成大序列（每行一个）"),
+
             &xyz_rust::define("file.hash", hash_data)
                 .summary("计算 SHA-256")
                 .cli(CliHints {
@@ -345,6 +406,14 @@ fn main() {
             &xyz_rust::define("net.head", head)
                 .summary("探测 API Key 注入")
                 .http(HTTPHints { method: "GET".into(), path: "/headers".into(), ..Default::default() }),
+
+            &xyz_rust::define("blocks.show", blocks_show)
+                .summary("内容块结果（文本 + 图片）")
+                .http(HTTPHints { method: "GET".into(), path: "/blocks".into(), ..Default::default() }),
+
+            &xyz_rust::define("pick.by", pick)
+                .summary("标签联合选择器")
+                .http(HTTPHints { method: "POST".into(), path: "/pick".into(), ..Default::default() }),
         ])
         // 可选的能力开关示例：
         //   .configure(xyz_rust::Config { capabilities: xyz_rust::Capabilities { no_mcp: true, ..Default::default() }, ..Default::default() })

@@ -379,6 +379,14 @@ async fn bearer_and_cors_middleware() {
         .unwrap();
     let resp = router.oneshot(req).await.unwrap();
     assert_eq!(resp.status().as_u16(), 204);
+    // 预检必须回写 Access-Control-Allow-Origin（浏览器缺它即拒绝全部 CORS）。
+    assert_eq!(
+        resp.headers()
+            .get("access-control-allow-origin")
+            .expect("preflight ACAO"),
+        "http://app.local"
+    );
+    assert_eq!(resp.headers().get("vary").unwrap(), "Origin");
 }
 
 #[tokio::test(flavor = "current_thread")]

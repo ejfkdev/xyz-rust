@@ -78,7 +78,7 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP：注册的命令即工
 cargo add xyz-rust        # crate 名是 xyz-rust——crates.io 上 `xyz` 已被无关项目占用
 ```
 
-导入形式 `use xyz_rust::...`。已发布到 crates.io（`xyz-rust`，当前 0.4.x 线）；仓库内示例以 path 依赖直接可跑。要求 **Rust 1.89+**（MSRV：官方 Rust SDK rmcp 3.6.0 引入的 `uuid` 1.28 下限为 1.89），edition 2024。完整可运行示例见 [examples/example](examples/example/src/main.rs)（crate 名 `xyz-example`，11 条命令覆盖全部常用写法），内部机制导览见 [examples/tour](examples/tour/src/main.rs)（`xyz-tour`），与已有 clap 工程共存见 [examples/clap](examples/clap/src/main.rs)（`xyz-clap`）。编译期派生宏在附属 crate `xyz-rust-macros` 中，由 `xyz-rust` 自动引入。
+导入形式 `use xyz_rust::...`。已发布到 crates.io（`xyz-rust`，当前 0.4.x 线）；仓库内示例以 path 依赖直接可跑。要求 **Rust 1.89+**（MSRV：官方 Rust SDK rmcp 3.6.0 引入的 `uuid` 1.28 下限为 1.89），edition 2024。完整可运行示例见 [examples/example](examples/example/src/main.rs)（crate 名 `xyz-example`，14 条命令覆盖全部常用写法），内部机制导览见 [examples/tour](examples/tour/src/main.rs)（`xyz-tour`），与已有 clap 工程共存见 [examples/clap](examples/clap/src/main.rs)（`xyz-clap`）。编译期派生宏在附属 crate `xyz-rust-macros` 中，由 `xyz-rust` 自动引入。
 
 ## 一次定义：入参 struct 与全局契约
 

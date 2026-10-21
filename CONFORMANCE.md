@@ -18,6 +18,7 @@ following evidence:
 |---|---|
 | `cargo test -p xyz-rust --lib` (128 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.89 | A.38–A.39 trim invariants |
+| `cargo test -p xyz-example --test e2e` (11 end-to-end cases driving the real binary: CLI formats/exit codes/help/blocks/broken pipe, HTTP binding/strict query/openapi/headers/gzip/CORS/bearer/TLS/blocks/unions, MCP stdio and streamable HTTP) | A.30 middleware order, A.64/A.65 wire behaviour, §11.1–§11.3, §12.5/§12.7 |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
 
@@ -171,6 +172,12 @@ evidence that locks it:
   session mode always answers SSE); rmcp upgraded to 3.6.0 (fixes
   `server/discover` without params, float-form ids, and consistent non-JSON
   stdio handling; remaining upstream limits are documented in the README).
+
+- **0.4.13** — CORS preflight now echoes `Access-Control-Allow-Origin`
+  (and `Vary: Origin`) as §11.4 requires; the missing header made browsers
+  reject every preflight. Found by the new end-to-end suite, which also
+  covers the example's content-block and tagged-union commands. Unit
+  regression added to `httpapi_test::bearer_and_cors_middleware`.
 
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;

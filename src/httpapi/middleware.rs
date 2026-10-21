@@ -90,12 +90,22 @@ pub fn cors_mw(
                     acao = Some((origin.to_string(), true));
                 }
             }
-            let is_preflight = req.method() == Method::OPTIONS && acao.is_some();
-            if is_preflight {
-                // 预检在鉴权之前应答：浏览器的 OPTIONS 不带 Authorization。
+            // 预检必须回写 Access-Control-Allow-Origin（浏览器缺它即拒绝），
+            // 且应答发生在鉴权之前：浏览器的 OPTIONS 不带 Authorization。
+            if req.method() == Method::OPTIONS
+                && let Some((origin, vary)) = acao.take()
+            {
                 let mut resp = Response::new(axum::body::Body::empty());
                 *resp.status_mut() = StatusCode::NO_CONTENT;
                 let h = resp.headers_mut();
+                let _ = h.insert(
+                    header::ACCESS_CONTROL_ALLOW_ORIGIN,
+                    header::HeaderValue::from_str(&origin)
+                        .unwrap_or(header::HeaderValue::from_static("*")),
+                );
+                if vary {
+                    let _ = h.insert(header::VARY, header::HeaderValue::from_static("Origin"));
+                }
                 h.insert(
                     header::ACCESS_CONTROL_ALLOW_METHODS,
                     header::HeaderValue::from_static("GET, POST, PUT, PATCH, DELETE, OPTIONS"),
