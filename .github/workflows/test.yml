@@ -40,7 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: end-to-end (real binary: CLI / HTTP / MCP stdio / MCP http / TLS)
+      - name: "end-to-end (real binary: CLI / HTTP / MCP stdio / MCP http / TLS)"
         run: cargo test -p xyz-example --test e2e
 
   msrv:
