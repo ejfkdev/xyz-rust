@@ -16,9 +16,9 @@ following evidence:
 
 | Evidence | Covers |
 |---|---|
-| `cargo test -p xyz-rust --lib` (128 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
+| `cargo test -p xyz-rust --lib` (130 tests: errors/logx/registry/spec/cli/dispatch/httpapi/mcp) | A.1–A.53 pipeline, taxonomy, rendering, dispatcher semantics, rich errors, formats, headers, unions, blocks |
 | `.github/workflows/test.yml` — six combination matrix (`default`, no-mcp, no-cli, no-http, cli-only, embedding-only) + fmt/clippy + MSRV 1.89 | A.38–A.39 trim invariants |
-| `cargo test -p xyz-example --test e2e` (11 end-to-end cases driving the real binary: CLI formats/exit codes/help/blocks/broken pipe, HTTP binding/strict query/openapi/headers/gzip/CORS/bearer/TLS/blocks/unions, MCP stdio and streamable HTTP) | A.30 middleware order, A.64/A.65 wire behaviour, §11.1–§11.3, §12.5/§12.7 |
+| `cargo test -p xyz-example --test e2e` (12 end-to-end cases driving the real binary: CLI formats/exit codes/help/blocks/broken pipe, HTTP binding/strict query/openapi/headers/gzip/CORS/bearer/TLS/blocks/unions, MCP stdio (including an unterminated final request) and streamable HTTP) | A.30 middleware order, A.64/A.65 wire behaviour, §11.1–§11.3, §12.5/§12.7 |
 | `examples/example` (11 commands), `examples/tour`, `examples/clap` | showcase fixture §3.1, invocation matrix §3.2 |
 | `docs/adapters.md` | A.41 embedding surfaces, §15.2 documentation |
 
@@ -178,6 +178,13 @@ evidence that locks it:
   reject every preflight. Found by the new end-to-end suite, which also
   covers the example's content-block and tagged-union commands. Unit
   regression added to `httpapi_test::bearer_and_cors_middleware`.
+
+- **0.4.14** — stdio framing: a final JSON-RPC message without a trailing
+  newline is no longer dropped at EOF (§12.3, conformance A.66; rmcp treats
+  the residual bytes as an incomplete message, so the stdio reader now
+  appends the delimiter at EOF). Dependencies refreshed to the latest
+  (rmcp 3.8.0, tokio 1.54.1, uuid 1.29.0; every direct dependency is at its
+  published latest).
 
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;

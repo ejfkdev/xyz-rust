@@ -224,6 +224,26 @@ fn mcp_stdio(args: &[&str], reqs: &[Value]) -> Vec<Value> {
         .collect()
 }
 
+/// 原样写入 stdio（不补结尾换行），用于 EOF 残余行的回归。
+fn mcp_stdio_raw(input: &str) -> Vec<Value> {
+    let mut c = Command::new(bin());
+    c.args(["mcp", "stdio"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = c.spawn().expect("spawn mcp stdio");
+    {
+        let mut si = child.stdin.take().expect("stdin");
+        si.write_all(input.as_bytes()).expect("write request");
+    }
+    let out = child.wait_with_output().expect("wait mcp stdio");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect()
+}
+
 fn tool_call(id: i64, name: &str, args: Value) -> Value {
     json!({"jsonrpc":"2.0","id":id,"method":"tools/call","params":{"name":name,"arguments":args}})
 }
@@ -812,6 +832,36 @@ fn mcp_stdio_versions_blocks_and_unions() {
     assert_eq!(ok["content"][0]["text"], "name=zed");
     let bad = &by_id(&msgs, 3)["result"];
     assert_eq!(bad["isError"], true, "{bad}");
+}
+
+#[test]
+fn mcp_stdio_last_request_without_trailing_newline_is_answered() {
+    // 单条 initialize 且无结尾换行：rmcp 的行读取会把它当作不完整的尾消息
+    // 丢弃，xyz-rust 在 EOF 处补换行后必须能正常应答（ddc 实测的现场）。
+    let input = init(1, "2025-11-25").to_string();
+    let msgs = mcp_stdio_raw(&input);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "single unterminated request must be answered: {msgs:?}"
+    );
+    assert_eq!(by_id(&msgs, 1)["result"]["protocolVersion"], "2025-11-25");
+
+    // 多行请求，最后一条不带换行：三条都要有响应。
+    let input = format!(
+        "{}\n{}\n{}",
+        init(1, "2025-11-25"),
+        initialized(),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})
+    );
+    let msgs = mcp_stdio_raw(&input);
+    let tools = by_id(&msgs, 2)["result"]["tools"]
+        .as_array()
+        .expect("tools/list must be answered");
+    assert_eq!(tools.len(), 14);
+    // 带换行的输入不受影响（回归护栏）。
+    let msgs = mcp_stdio(&[], &[init(1, "2025-11-25")]);
+    assert_eq!(by_id(&msgs, 1)["result"]["protocolVersion"], "2025-11-25");
 }
 
 // ================================================================ MCP http

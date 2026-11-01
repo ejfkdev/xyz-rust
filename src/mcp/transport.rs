@@ -59,6 +59,58 @@ pub(crate) fn run(ctx: &Ctx, reg: &Registry, args: &[String], base: Options) -> 
     }
 }
 
+/// stdio 读取适配器：底层 EOF 时若最后一条消息没有换行终止，补一个 '\n'。
+///
+/// rmcp 的行读取路径把 EOF 时缓冲区里的残留字节当作「不完整的尾消息」丢弃
+/// （`async_rw.rs` 的 `LineRead::Eof` 分支），因此客户端最后一条不带换行的
+/// JSON-RPC 请求会永久无响应。这里在 EOF 处补一个换行让该行被正常投递；
+/// 已经以换行结尾（或空流）的输入不会被多加内容。
+struct EofNewline<R> {
+    inner: R,
+    last_was_newline: bool,
+    done: bool,
+}
+
+impl<R> EofNewline<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            last_was_newline: true,
+            done: false,
+        }
+    }
+}
+
+impl<R: tokio::io::AsyncRead + Unpin> tokio::io::AsyncRead for EofNewline<R> {
+    fn poll_read(
+        self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let this = self.get_mut();
+        if this.done {
+            return std::task::Poll::Ready(Ok(()));
+        }
+        let before = buf.filled().len();
+        match std::pin::Pin::new(&mut this.inner).poll_read(cx, buf) {
+            std::task::Poll::Ready(Ok(())) => {
+                let filled = buf.filled().len();
+                if filled > before {
+                    this.last_was_newline = buf.filled()[filled - 1] == b'\n';
+                } else {
+                    // 底层 EOF：补齐缺失的换行（下一轮 poll 返回 EOF）。
+                    this.done = true;
+                    if !this.last_was_newline && buf.remaining() > 0 {
+                        buf.put_slice(b"\n");
+                    }
+                }
+                std::task::Poll::Ready(Ok(()))
+            }
+            other => other,
+        }
+    }
+}
+
 /// stdio：进程内传输，客户端断开（EOF/关停）是正常退出。
 fn serve_stdio(server: &XyzServer) -> i32 {
     let rt = match tokio::runtime::Runtime::new() {
@@ -80,8 +132,13 @@ fn serve_stdio(server: &XyzServer) -> i32 {
                 ct.cancel();
             })
         };
-        let res =
-            rmcp::service::ServiceExt::serve_with_ct(server, rmcp::transport::stdio(), ct).await;
+        // 用与本库读取适配器组合的 AsyncRwTransport 取代裸 stdio()：EOF 前的
+        // 未终止行也要被投递（见 EofNewline 的说明）。
+        let transport = rmcp::transport::async_rw::AsyncRwTransport::new_server(
+            EofNewline::new(tokio::io::stdin()),
+            tokio::io::stdout(),
+        );
+        let res = rmcp::service::ServiceExt::serve_with_ct(server, transport, ct).await;
         watcher.abort();
         match res {
             Ok(running) => {
@@ -279,4 +336,30 @@ pub fn validate_transport_versions(transport: &str, opts: &Options) -> errors::R
             opts.versions
         ),
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::EofNewline;
+    use tokio::io::AsyncReadExt;
+
+    async fn read_all(input: &[u8]) -> Vec<u8> {
+        let mut r = EofNewline::new(input);
+        let mut out = Vec::new();
+        r.read_to_end(&mut out).await.unwrap();
+        out
+    }
+
+    #[tokio::test]
+    async fn eof_without_newline_gets_one() {
+        assert_eq!(read_all(b"{\"a\":1}").await, b"{\"a\":1}\n");
+        assert_eq!(read_all(b"a\nb").await, b"a\nb\n");
+    }
+
+    #[tokio::test]
+    async fn eof_with_newline_is_untouched() {
+        assert_eq!(read_all(b"{\"a\":1}\n").await, b"{\"a\":1}\n");
+        assert_eq!(read_all(b"").await, b"");
+        assert_eq!(read_all(b"x\r\n").await, b"x\r\n");
+    }
 }
