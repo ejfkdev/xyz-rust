@@ -186,6 +186,10 @@ evidence that locks it:
   (rmcp 3.8.0, tokio 1.54.1, uuid 1.29.0; every direct dependency is at its
   published latest).
 
+- **0.4.15** — dependency refresh: rmcp 3.10.0 (skills extension SEP-2640 era,
+  discover-session hardening), all transitive deps at latest; no API or
+  behaviour change (130 tests, six-combo matrix, MSRV 1.89 unchanged).
+
 Known remaining gaps are in the deviations register: D-rust-12 closed
 (MCPHints.name), D-go-01 (tagged unions in Go) is the Go side's open item;
 the reserved style axis (§10.7a colour) is explicitly future work per spec.

@@ -78,7 +78,7 @@ $ cargo run -p xyz-example -- mcp stdio            # MCP：注册的命令即工
 cargo add xyz-rust        # crate 名是 xyz-rust——crates.io 上 `xyz` 已被无关项目占用
 ```
 
-导入形式 `use xyz_rust::...`。已发布到 crates.io（`xyz-rust`，当前 0.4.x 线）；仓库内示例以 path 依赖直接可跑。要求 **Rust 1.89+**（MSRV：官方 Rust SDK rmcp 3.8.0 引入的 `uuid` 1.29 下限为 1.89），edition 2024。完整可运行示例见 [examples/example](examples/example/src/main.rs)（crate 名 `xyz-example`，14 条命令覆盖全部常用写法），内部机制导览见 [examples/tour](examples/tour/src/main.rs)（`xyz-tour`），与已有 clap 工程共存见 [examples/clap](examples/clap/src/main.rs)（`xyz-clap`）。编译期派生宏在附属 crate `xyz-rust-macros` 中，由 `xyz-rust` 自动引入。
+导入形式 `use xyz_rust::...`。已发布到 crates.io（`xyz-rust`，当前 0.4.x 线）；仓库内示例以 path 依赖直接可跑。要求 **Rust 1.89+**（MSRV：官方 Rust SDK rmcp 3.10.0 引入的 `uuid` 1.29 下限为 1.89），edition 2024。完整可运行示例见 [examples/example](examples/example/src/main.rs)（crate 名 `xyz-example`，14 条命令覆盖全部常用写法），内部机制导览见 [examples/tour](examples/tour/src/main.rs)（`xyz-tour`），与已有 clap 工程共存见 [examples/clap](examples/clap/src/main.rs)（`xyz-clap`）。编译期派生宏在附属 crate `xyz-rust-macros` 中，由 `xyz-rust` 自动引入。
 
 ## 一次定义：入参 struct 与全局契约
 
@@ -409,14 +409,14 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 
 ## 与 Go 版差异
 
-1. **sse 传输不存在**：官方 Rust SDK（rmcp 3.8.0）随 2026-07-28 修订移除了 HTTP+SSE 传输，`mcp sse` 可被解析但以清晰错误应答、退出码 2。可用传输：`stdio` 与流式 `http`。
-2. **serde 进核心**：Rust std 无 JSON，核心（spec / registry / errors / cli / logx / 根）除 serde + serde_json（「缺位标准库」）外零第三方依赖；chrono 同为核心依赖（时间类型）。`httpapi` 基于 axum（Rust 生态事实标准 HTTP 栈，官方 rmcp 的 streamable-HTTP 示例同栈），`mcp` 基于官方 Rust SDK `rmcp`（钉定 `=3.8.0`）——唯一另一边直接第三方依赖树。`http` 与 `mcp` 共享 tokio+axum 依赖簇（内部 feature `http-stack`）。
+1. **sse 传输不存在**：官方 Rust SDK（rmcp 3.10.0）随 2026-07-28 修订移除了 HTTP+SSE 传输，`mcp sse` 可被解析但以清晰错误应答、退出码 2。可用传输：`stdio` 与流式 `http`。
+2. **serde 进核心**：Rust std 无 JSON，核心（spec / registry / errors / cli / logx / 根）除 serde + serde_json（「缺位标准库」）外零第三方依赖；chrono 同为核心依赖（时间类型）。`httpapi` 基于 axum（Rust 生态事实标准 HTTP 栈，官方 rmcp 的 streamable-HTTP 示例同栈），`mcp` 基于官方 Rust SDK `rmcp`（钉定 `=3.10.0`）——唯一另一边直接第三方依赖树。`http` 与 `mcp` 共享 tokio+axum 依赖簇（内部 feature `http-stack`）。
 3. **无反射**：Go 侧靠 struct tag 反射在运行时做的事，Rust 全部由派生宏编译期生成。属性词汇 `#[xyz(desc="...", name="w", required, secret, skip, validate="min=2,email", default="18", enum="a,b", cli="positional"/"shorthand=a,env=X"/"hidden"/"-", http="query|path|header|form|body", http_name="X-Key")]` 与 Go 的 tag 逐一对应，另支持 serde `rename` 回退与 `rename_all`；命名标量 newtype 用 `#[derive(XyzField)]`；结果 struct 用 `#[derive(Serialize, XyzOutput)]`（wire 名走 serde 惯例），也可不 derive——`XyzArgs` 入参 struct 自动获得 `XyzSchema`。
 4. **Handler 形态**：`fn(handler(_: &Ctx, _: &Args) -> Result<Resp, E>)`，`E: std::error::Error`（错误链上的分类被保留），`R: Serialize`。`define("name", h)` 全类型推断，无 Go 的 `Define[T,R]` 显式泛型。
 5. **结果渲染**：struct 与 map 同形——都先经 serde_json 序列化成 `Value`，`preserve_order` 保留声明序（Go 的 map 按键排序）；`Vec<u8>` 作为结果类型的输出 schema 是数组形（输入侧仍是 string）；`std::time::Duration` 负值不支持（Rust 语义）；oneof 对 struct 无 `%v` 形态；`--format markdown` 下 struct 与 map 序列化后同形，统一用 `| Field | Value |` 表头（Go 的 map 用 `| Key | Value |`）。
 6. **版本注入**：发布期调用 `set_version("v1.2.3")`——Rust 没有 `-ldflags -X` 注入，默认*应用*版本为 `dev`（xyz-spec §12.6）；库自身版本（`version::SDK_VERSION` = crate 版本）另行报告于 `X-XYZ-Version` 与 `_meta.xyz.sdk_version`。
 7. **HTTP 语义**：Gzip 用 `tower-http`（任意体积响应都压缩，且完整处理 `Accept-Encoding` 的 q 值；Go 只查头）；每请求超时经 `TimeoutLayer` 应答 **408**（而非 504）；请求级取消——客户端断开不打断 handler 执行；标准头超时未配置（非零 `Config.timeout` 是唯一超时层）。
-8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）；MCP 结构化输出按规范门控（object 才发 `outputSchema`、object 值才进 `structuredContent`、修订 ≥ 2025-06-18），而 Go 目前对一切可模式化结果类型都挂 `outputSchema`、`structuredContent` 也照发裸值——已登记 `D-go-04`；rmcp 3.8.0 的已知上游限制（来自 ddc 的协议测试；不改传输层无法在 xyz 侧修复）：`tools/call` 缺 `params` 回 `-32601` 而非 `-32602`；畸形 JSON body 回 HTTP 415 而非 400；同一会话重复 DELETE 两次都回 202；`id: null` 请求回 `-32600` 而不回显 id。随 3.6.0/3.8.0 升级已修：`server/discover` 缺 `params` 现回 `-32602`（原 `-32601`）、浮点形式 id 按整数读取、stdio 非 JSON 行处理一致化。另有一处上游缺口在本库侧补偿：rmcp 会丢弃最后一条不带结尾换行的 stdio 消息，xyz-rust 包装 stdio 读取器、在 EOF 处补分隔符（conformance A.66）。`initialize` 的能力对象范围因 SDK 默认而不同：Go 的 go-sdk 自动发出 `{"logging":{},"tools":{"listChanged":true}}`，xyz-rust 声明真实最小集 `{"tools":{}}`（不发 list_changed 通知）。
+8. **MCP 差异**：`--versions` 全集与 Go 一致——`2024-11-05`、`2025-03-26`、`2025-06-18`、`2025-11-25`、`2026-07-28`（最新）——但版本钉定经 `supported_protocol_versions` 交给 SDK 协商；streamable HTTP 服务 2026-07-28 需 `--stateless`；SDK 的 streamable-HTTP 服务默认仅允许 loopback `Host` 头（rmcp 防 DNS rebinding）；MCP 结构化输出按规范门控（object 才发 `outputSchema`、object 值才进 `structuredContent`、修订 ≥ 2025-06-18），而 Go 目前对一切可模式化结果类型都挂 `outputSchema`、`structuredContent` 也照发裸值——已登记 `D-go-04`；rmcp 3.10.0 的已知上游限制（来自 ddc 的协议测试；不改传输层无法在 xyz 侧修复）：`tools/call` 缺 `params` 回 `-32601` 而非 `-32602`；畸形 JSON body 回 HTTP 415 而非 400；同一会话重复 DELETE 两次都回 202；`id: null` 请求回 `-32600` 而不回显 id。随 3.6.0/3.8.0 升级已修：`server/discover` 缺 `params` 现回 `-32602`（原 `-32601`）、浮点形式 id 按整数读取、stdio 非 JSON 行处理一致化。另有一处上游缺口在本库侧补偿：rmcp 会丢弃最后一条不带结尾换行的 stdio 消息，xyz-rust 包装 stdio 读取器、在 EOF 处补分隔符（conformance A.66）。`initialize` 的能力对象范围因 SDK 默认而不同：Go 的 go-sdk 自动发出 `{"logging":{},"tools":{"listChanged":true}}`，xyz-rust 声明真实最小集 `{"tools":{}}`（不发 list_changed 通知）。
 9. **能力开关在运行时仍然可用**：`Capabilities { no_cli, no_mcp, no_http }` 是 `Config` 字段，与 Cargo features 相互独立。
 
 以上全部差异连同规范章节引用，登记在规范仓库的
@@ -426,7 +426,7 @@ xyz_rust::cli::run_context(&ctx, &reg, args, xyz_rust::cli::Options::default());
 
 ## 依赖原则与体积
 
-- **核心只认 serde 家族**：核心模块除 serde、serde_json、chrono 外零第三方依赖；CLI 前端是 std + serde（无 HTTP 构建下信号只用 ctrlc）；`httpapi` 需要 axum 簇（`http-stack`：tokio、axum、axum-server、tower-http、rustls；TLS 走 rustls 的 `ring` provider——axum-server 以 `tls-rustls-no-provider` 构建、启动时显式安装 ring，嵌入方的依赖图即使同时带 `aws-lc-rs` 也保持确定性）；其上唯一的第三方树是官方 `rmcp`（钉定 `=3.8.0`，与 `mcp` 共享）。
+- **核心只认 serde 家族**：核心模块除 serde、serde_json、chrono 外零第三方依赖；CLI 前端是 std + serde（无 HTTP 构建下信号只用 ctrlc）；`httpapi` 需要 axum 簇（`http-stack`：tokio、axum、axum-server、tower-http、rustls；TLS 走 rustls 的 `ring` provider——axum-server 以 `tls-rustls-no-provider` 构建、启动时显式安装 ring，嵌入方的依赖图即使同时带 `aws-lc-rs` 也保持确定性）；其上唯一的第三方树是官方 `rmcp`（钉定 `=3.10.0`，与 `mcp` 共享）。
 - **Cargo features 自由裁剪**（任意组合）：
 
 | Features | 通道 | 体积（macOS arm64，`cargo build --release` + strip，`xyz-example` 实测） |
